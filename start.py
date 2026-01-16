@@ -3,7 +3,6 @@ import pandas as pd
 import requests
 import os
 import re
-import time
 from datetime import datetime
 from bs4 import BeautifulSoup
 
@@ -19,7 +18,7 @@ def get_company_summary(code):
         summary_tag = soup.select_one('.summary_info')
         if summary_tag:
             text = summary_tag.get_text(separator=' ').strip()
-            summary = text.split('\n')[0][:100] # 첫 줄만 추출
+            summary = text.split('\n')[0][:100]
             return summary
         return "기업 정보 요약을 찾을 수 없습니다."
     except:
@@ -31,9 +30,8 @@ def get_disparity_stocks(codes, names, threshold):
     found_any = False
     for i, code in enumerate(codes):
         try:
-            # 최근 25일치 데이터 수집
             df = fdr.DataReader(code).tail(25)
-            if len(df) < 20: continue # 데이터 부족 시 패스
+            if len(df) < 20: continue
             
             curr = df['Close'].iloc[-1]
             ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
@@ -47,14 +45,52 @@ def get_disparity_stocks(codes, names, threshold):
     return results, found_any
 
 def main():
-    # --- [Step 0] 휴장일 입구 컷 (가장 먼저 실행) ---
+    # --- [Step 0] 휴장일 입구 컷 ---
     print("📅 [검사] 오늘 시장이 열렸는지 확인합니다...")
     now_str = datetime.now().strftime('%Y%m%d')
     
     try:
-        # 오늘 날짜의 삼성전자 데이터가 있는지 딱 확인
         check_df = fdr.DataReader('005930', now_str, now_str)
-        
         if check_df.empty:
             print("🏝️ 오늘은 휴장일입니다. 메시지를 보냅니다.")
-            msg = f"🏝️ 오늘은 주식시장 휴장일({
+            msg = f"🏝️ 오늘은 주식시장 휴장일({datetime.now().strftime('%Y-%m-%d')})입니다. 비서는 이만 퇴근합니다!"
+            requests.post(DISCORD_WEBHOOK_URL, data={'content': msg})
+            return
+    except:
+        return
+
+    # --- [Step 1] 장이 열린 날 분석 ---
+    print("🔍 분석 시작 (이격도 90 -> 95)")
+    df_krx = fdr.StockListing('KRX')
+    df_top500 = df_krx.sort_values(by='Marcap', ascending=False).head(500)
+    codes, names = df_top500['Code'].tolist(), df_top500['Name'].tolist()
+
+    # 1차 시도: 90 이하
+    under_stocks, success = get_disparity_stocks(codes, names, 90)
+    current_threshold = 90
+
+    # 2차 시도: 95 확장
+    if not success:
+        print("💡 95로 확장 분석 중...")
+        under_stocks, success = get_disparity_stocks(codes, names, 95)
+        current_threshold = 95
+
+    # --- [Step 2] 결과 보고 ---
+    if success:
+        with open("targets.txt", "w", encoding="utf-8") as f:
+            clean_list = []
+            for item in under_stocks:
+                match = re.search(r'\*\*(.*?)\*\*\((\d+)\)', item)
+                if match:
+                    name, code = match.groups()
+                    clean_list.append(f"{code},{name}")
+            f.write("\n".join(clean_list))
+        
+        report_msg = f"✅ **1단계 완료 (기준: 이격도 {current_threshold}이하)**\n\n" + "\n".join(under_stocks)
+        requests.post(DISCORD_WEBHOOK_URL, data={'content': report_msg})
+    else:
+        if os.path.exists("targets.txt"): os.remove("targets.txt")
+        requests.post(DISCORD_WEBHOOK_URL, data={'content': "ℹ️ 오늘은 이격도 95 이하인 종목도 없습니다."})
+
+if __name__ == "__main__":
+    main()
