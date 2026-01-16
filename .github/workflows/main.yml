@@ -1,19 +1,32 @@
-steps:
+name: Stock Analysis Pipeline
+
+on:
+  schedule:
+    - cron: '0 8 * * 1-5' # 한국시간 오후 5시 (UTC 8시)
+  workflow_dispatch: # 수동 실행 버튼
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
       - name: Install dependencies
-        run: pip install pandas FinanceDataReader requests lxml
+        run: |
+          pip install pandas FinanceDataReader requests lxml
 
-      - name: Run Disparity Analysis (Step 1)
-        run: python start.py  # 여기서 1단계 실행
-
-      - name: Run Finance Filter (Step 2)
-        run: python finance_filter.py  # 여기서 2단계 실행 (추가된 부분)
+      - name: Step 1 - Run Disparity Analysis
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python start.py
+
+      - name: Step 2 - Run Finance Filter
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python finance_filter.py
