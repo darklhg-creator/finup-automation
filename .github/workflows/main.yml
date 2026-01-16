@@ -1,27 +1,19 @@
-name: Finup Capture Automation
-
-on:
-  schedule:
-    - cron: '0 8 * * 1-5' # 월-금 오후 5시(한국시간) 실행
-  workflow_dispatch: # 수동 실행 버튼
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
+steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v2
         with:
           python-version: '3.9'
 
       - name: Install dependencies
-        run: |
-          pip install selenium webdriver-manager requests finance-datareader pandas
+        run: pip install pandas FinanceDataReader requests lxml
 
-      - name: Run script
+      - name: Run Disparity Analysis (Step 1)
+        run: python start.py  # 여기서 1단계 실행
+
+      - name: Run Finance Filter (Step 2)
+        run: python finance_filter.py  # 여기서 2단계 실행 (추가된 부분)
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python start.py
