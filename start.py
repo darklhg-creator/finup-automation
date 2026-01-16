@@ -1,5 +1,3 @@
-Python
-
 import requests
 import FinanceDataReader as fdr
 import pandas as pd
