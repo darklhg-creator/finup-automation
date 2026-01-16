@@ -1,43 +1,58 @@
-import FinanceDataReader as fdr
-import pandas as pd
 import requests
+import pandas as pd
 import os
 
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
-def check_profit_growth(code):
-    """네이버 금융에서 분기 영업이익 성장세 확인"""
+def check_growth(code):
     try:
         url = f"https://finance.naver.com/item/main.naver?code={code}"
-        tables = pd.read_html(requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text)
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
+        # 네이버 금융 재무제표 테이블 추출
+        tables = pd.read_html(res.text)
         df = tables[3]
         df.columns = df.columns.get_level_values(1)
         df.set_index('주요재무정보', inplace=True)
         
-        # 영업이익 행 추출
-        op_profit = df.loc['영업이익']
-        # 최근 분기(25.12)와 이전 분기(25.09) 데이터 비교 (연도는 상황에 따라 자동매칭)
-        # 값이 숫자인지 확인하고 증가했으면 True 반환
-        if float(op_profit.iloc[8]) > float(op_profit.iloc[7]): # 7번째, 8번째 컬럼이 분기 데이터
-            return True, op_profit.iloc[7], op_profit.iloc[8]
-        return False, 0, 0
-    except:
-        return False, 0, 0
+        # 영업이익 행에서 최근 두 분기 데이터 비교
+        row = df.loc['영업이익']
+        # iloc[7]은 전전분기, iloc[8]은 전분기 데이터입니다.
+        prev_q = float(row.iloc[7])
+        curr_q = float(row.iloc[8])
+        
+        return (curr_q > prev_q, prev_q, curr_q)
+    except Exception as e:
+        print(f"Error checking {code}: {e}")
+        return (False, 0, 0)
 
 def main():
-    # 실제로는 start.py에서 넘겨받은 리스트를 써야 하지만, 
-    # 독립 실행 테스트를 위해 상위 종목 중 이격도 낮은 것들을 임시로 가정합니다.
-    print("📊 2단계: 재무 필터링 시작 (영업이익 성장주 찾기)")
+    # 1단계에서 만든 파일이 있는지 확인
+    if not os.path.exists("targets.txt"):
+        requests.post(DISCORD_WEBHOOK_URL, data={'content': "ℹ️ 1단계 분석 파일이 없어 2단계를 건너뜁니다."})
+        return
     
-    # 예시 종목 (나중에는 start.py의 결과를 파일로 읽어오게 수정 가능)
-    target_stocks = [{"name": "삼성전자", "code": "005930"}] 
-    
-    final_list = []
-    for stock in target_stocks:
-        growth, p_val, c_val = check_profit_growth(stock['code'])
-        if growth:
-            final_list.append(f"✅ {stock['name']}: {p_val}억 -> {c_val}억 (상승)")
+    with open("targets.txt", "r", encoding="utf-8") as f:
+        targets = f.read().splitlines()
 
-    if final_list:
-        msg = "🏆 **[재무 필터 통과] 실적 성장 과매도주**\n" + "\n".join(final_list)
-        requests.post(DISCORD_WEBHOOK_URL, data={'content': msg})
+    if not targets:
+        requests.post(DISCORD_WEBHOOK_URL, data={'content': "ℹ️ 1단계에서 추출된 후보 종목이 없습니다."})
+        return
+
+    final_results = []
+    for line in targets:
+        if "," not in line: continue
+        code, name = line.split(",")
+        is_up, v1, v2 = check_growth(code)
+        if is_up:
+            final_results.append(f"· **{name}**({code}): {v1:.0f}억 → {v2:.0f}억 📈")
+
+    # 결과 전송 로직
+    if final_results:
+        msg = "🏆 **[2단계 필터 통과] 실적 성장 과매도주**\n\n" + "\n".join(final_results)
+    else:
+        msg = "📊 **[2단계 결과]** 이격도 종목 중 '영업이익 상승' 조건을 만족하는 종목이 오늘 장에는 없습니다. 🏝️"
+        
+    requests.post(DISCORD_WEBHOOK_URL, data={'content': msg})
+
+if __name__ == "__main__":
+    main()
