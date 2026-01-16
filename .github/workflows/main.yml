@@ -2,7 +2,7 @@ name: Stock Analysis Pipeline
 
 on:
   schedule:
-    - cron: '0 8 * * 1-5' # 한국시간 오후 5시 (UTC 8시)
+    - cron: '0 8 * * 1-5' # 한국시간 오후 5시 (평일)
   workflow_dispatch: # 수동 실행 버튼
 
 jobs:
@@ -19,7 +19,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas FinanceDataReader requests lxml
+          python -m pip install --upgrade pip
+          pip install finance-datareader pandas==2.0.3 requests lxml beautifulsoup4
 
       - name: Step 1 - Run Disparity Analysis
         env:
