@@ -1,0 +1,29 @@
+name: Finup Capture Automation
+
+on:
+  schedule:
+    # 한국 시간(KST) 오후 5:00는 UTC 기준 오전 8:00입니다.
+    # 분 시 일 월 요일 순서 (1-5는 월-금)
+    - cron: '0 8 * * 1-5'
+  workflow_dispatch: # 언제든 수동으로 실행해볼 수 있는 버튼
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install selenium webdriver-manager requests
+
+      - name: Run script
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python start.py
