@@ -1,20 +1,15 @@
 import requests
 import FinanceDataReader as fdr
 import pandas as pd
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
-import time
 import os
 
 # 디스코드 웹훅 설정
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
 def get_oversold_stocks():
-    print("🔍 시총 상위 500위 분석 시작...")
+    print("🔍 통합 시총 상위 500위 분석 시작...")
     try:
-        # 통합 시총 상위 500위 추출
+        # 1. 시총 상위 500위 추출
         df_krx = fdr.StockListing('KRX')
         df_top500 = df_krx.sort_values(by='Marcap', ascending=False).head(500)
         target_codes = df_top500['Code'].tolist()
@@ -22,13 +17,12 @@ def get_oversold_stocks():
         
         all_stocks_data = []
         
+        # 2. 데이터 수집 및 이격도 계산
         for i, code in enumerate(target_codes):
             try:
-                # 최근 25일치 데이터로 속도 최적화
                 df = fdr.DataReader(code).tail(25)
                 if len(df) < 20: continue
                 
-                # 20일 이격도 계산
                 current_price = df['Close'].iloc[-1]
                 ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
                 disparity = (current_price / ma20) * 100
@@ -38,47 +32,35 @@ def get_oversold_stocks():
             except:
                 continue
         
-        all_stocks_data.sort(key=lambda x: x['disparity'])
-        # 이격도 95 이하 필터링
-        under_95 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data if s['disparity'] <= 95]
+        # 3. 우선순위 필터링 로직 (90% 이하 -> 없으면 95% 이하)
+        under_90 = [s for s in all_stocks_data if s['disparity'] <= 90]
+        under_95 = [s for s in all_stocks_data if s['disparity'] <= 95]
         
-        if under_95:
-            return "🔍 [이격도 95 이하 포착]", under_95
-        
-        lowest_5 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data[:5]]
-        return "❓ [이격도 최하위 5종목]", lowest_5
+        if under_90:
+            title = "🚨 [긴급] 이격도 90 이하 과매도 종목"
+            selected_stocks = sorted(under_90, key=lambda x: x['disparity'])
+        elif under_95:
+            title = "⚠️ [주의] 이격도 95 이하 관심 종목"
+            selected_stocks = sorted(under_95, key=lambda x: x['disparity'])
+        else:
+            title = "ℹ️ 이격도 최하위 5종목 (95 초과)"
+            selected_stocks = sorted(all_stocks_data, key=lambda x: x['disparity'])[:5]
+            
+        return title, [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in selected_stocks]
 
     except Exception as e:
-        return f"⚠️ 에러: {str(e)}", []
+        return f"❌ 에러 발생: {str(e)}", []
 
 def main():
-    title_text, stocks = get_oversold_stocks()
-    stock_msg = "\n".join(stocks[:25])
+    title_text, stock_list = get_oversold_stocks()
     
-    print("📸 핀업 테마 로그 고화질 캡처 중...")
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    # 화면 크기를 1920x1080으로 고정하여 레이아웃 깨짐 방지 🖥️
-    options.add_argument("--window-size=1920,1080") 
-
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-
-    try:
-        driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-        # 페이지 로딩 및 표가 그려질 때까지 넉넉히 대기 ⏳
-        time.sleep(20) 
-        
-        save_path = "capture.png"
-        driver.save_screenshot(save_path)
-        
-        with open(save_path, 'rb') as f:
-            content = f"📈 **주식 장 종료 보고서**\n\n**{title_text}**\n{stock_msg}\n\n**3️⃣ 핀업 실시간 테마 로그**"
-            requests.post(DISCORD_WEBHOOK_URL, data={'content': content}, files={'file': f})
-            print("🏁 전송 완료!")
-    finally:
-        driver.quit()
+    # 메시지 구성 (최대 25개까지만 출력)
+    stock_msg = "\n".join(stock_list[:25])
+    content = f"📈 **주식 장 종료 보고서**\n\n**{title_text}**\n{stock_msg}"
+    
+    # 디스코드 전송 (파일 없이 텍스트만 전송)
+    requests.post(DISCORD_WEBHOOK_URL, data={'content': content})
+    print(f"🏁 분석 완료 및 전송 성공: {title_text}")
 
 if __name__ == "__main__":
     main()
