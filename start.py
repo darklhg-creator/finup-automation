@@ -7,62 +7,70 @@ import time
 # 디스코드 웹훅 설정
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
-def get_foreign_buy_strength(code):
-    """오늘 외국인 순매수량이 최근 5일 평균 대비 얼마나 강력한지 계산"""
+def get_financial_growth(code):
+    """네이버 금융에서 영업이익 성장 여부 확인 (25.12 vs 25.09)"""
     try:
-        # 투자자별 매매동향 데이터를 가져옵니다 (데이터 소스에 따라 컬럼명 확인 필요)
-        # fdr에서는 종목별 상세 수급을 위해 별도의 크롤링이나 API 연결이 권장됩니다.
-        # 여기서는 로직 구현을 위해 평균 대비 비율을 계산하는 구조를 잡습니다.
+        url = f"https://finance.naver.com/item/main.naver?code={code}"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(url, headers=headers, timeout=5)
+        tables = pd.read_html(res.text)
+        finance_df = tables[3]
+        finance_df.columns = finance_df.columns.get_level_values(1)
+        finance_df.set_index('주요재무정보', inplace=True)
         
-        # 실제 운영시에는 네이버 금융의 '투자자별 매매동향' 표를 활용하는 것이 정확합니다.
-        # 예시: 오늘 50만주 / 최근 5일 평균 10만주 = 5.0배
-        strength = 4.5 # 테스트를 위한 가상 수치
-        return True, strength
+        op_profit = finance_df.loc['영업이익']
+        # 날짜 컬럼 찾기 (예상치 E 포함)
+        curr_q = [c for c in finance_df.columns if '2025.12' in c][0]
+        prev_q = [c for c in finance_df.columns if '2025.09' in c][0]
+        
+        v_curr = float(op_profit[curr_q])
+        v_prev = float(op_profit[prev_q])
+        
+        if pd.notna(v_curr) and pd.notna(v_prev) and v_curr > v_prev:
+            return True, v_curr, v_prev
+        return False, v_curr, v_prev
     except:
-        return False, 0
-
-def get_news_summary(stock_name):
-    """네이버 뉴스 제목에서 주요 키워드 추출"""
-    try:
-        # 뉴스 제목들을 긁어와서 핵심 단어만 보여줍니다.
-        # 실제 구현 시 BeautifulSoup을 사용해 뉴스 제목을 파싱합니다.
-        return "수주 확대, 흑자 전환, 신기술 발표" 
-    except:
-        return "분석 중"
+        return False, 0, 0
 
 def main():
-    print("📊 시장 종합 분석 시스템 가동...")
-    
-    # 1. 시총 500위 중 이격도 필터링
+    print("🔍 1단계: 이격도 분석 시작...")
     df_krx = fdr.StockListing('KRX')
     df_top500 = df_krx.sort_values(by='Marcap', ascending=False).head(500)
     
-    # ... (중략: 이격도 및 영업이익 상승 로직 수행) ...
-    # 최종 선별된 종목이 'candidate_stocks'라고 가정합니다.
-    candidate_stocks = [{"name": "현대차", "code": "005380", "v_curr": 40000, "v_prev": 35000}]
+    # --- [1단계: 이격도 필터링] ---
+    all_candidates = []
+    for i, row in df_top500.iterrows():
+        try:
+            df = fdr.DataReader(row['Code']).tail(25)
+            curr_price = df['Close'].iloc[-1]
+            ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
+            disparity = (curr_price / ma20) * 100
+            all_candidates.append({'name': row['Name'], 'code': row['Code'], 'disp': disparity})
+        except: continue
 
-    final_report = []
-    for s in candidate_stocks:
-        # 수급 분석
-        is_strong, strength = get_foreign_buy_strength(s['code'])
-        # 뉴스 분석
-        news_keywords = get_news_summary(s['name'])
-        
-        # 리포트 구성
-        report = (
-            f"💎 **{s['name']}** ({s['code']})\n"
-            f"   - **수급 강도: {strength:.1f}배 유입** (평균 대비) 💰\n"
-            f"   - **실적: {s['v_prev']:,}억 → {s['v_curr']:,}억 (상승)** 📈\n"
-            f"   - **최신 뉴스: [{news_keywords}]** 📰"
-        )
-        final_report.append(report)
+    u90 = [s for s in all_candidates if s['disp'] <= 90]
+    u95 = [s for s in all_candidates if s['disp'] <= 95]
+    step1_list = u90 if u90 else u95
+    label = "90 이하" if u90 else "95 이하"
 
-    # 디스코드 전송
-    if final_report:
-        full_msg = "🎯 **[오늘의 슈퍼 반등 후보 종목]**\n\n" + "\n\n".join(final_report)
-        requests.post(DISCORD_WEBHOOK_URL, data={'content': full_msg})
-    
-    print("🏁 분석 완료!")
+    # 1차 전송
+    msg1 = f"📢 **[1단계] 이격도 {label} 종목 ({len(step1_list)}개)**\n"
+    msg1 += "\n".join([f"· {s['name']}({s['code']}): {s['disp']:.1f}" for s in step1_list[:25]])
+    requests.post(DISCORD_WEBHOOK_URL, data={'content': msg1})
 
-if __name__ == "__main__":
-    main()
+    # --- [2단계: 재무 필터링] ---
+    print("🔍 2단계: 재무 분석 시작...")
+    step2_list = []
+    for s in step1_list:
+        is_growth, v1, v2 = get_financial_growth(s['code'])
+        if is_growth:
+            step2_list.append({'name': s['name'], 'code': s['code'], 'v_curr': v1, 'v_prev': v2})
+        time.sleep(0.1)
+
+    # 2차 전송
+    msg2 = f"📊 **[2단계] 실적 성장 필터 완료 ({len(step2_list)}개)**\n"
+    msg2 += "\n".join([f"· {s['name']}: {s['v_prev']:.0;f}억 → {s['v_curr']:.0;f}억" for s in step2_list]) if step2_list else "조건 부합 종목 없음"
+    requests.post(DISCORD_WEBHOOK_URL, data={'content': msg2})
+
+    # --- [3단계: 수급/뉴스 분석] ---
+    # 여기에 아까 만든 수급/뉴스 로직을 step2_list 대상으로 실행...
