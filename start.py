@@ -2,51 +2,35 @@ import FinanceDataReader as fdr
 import pandas as pd
 import requests
 import os
+import re
 from datetime import datetime
 
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
-def is_market_open():
-    """오늘이 한국 주식시장 개장일인지 확인"""
-    # KRX는 개장일 데이터를 제공합니다.
-    now = datetime.now()
-    # 오늘 날짜의 개장 여부 확인 (가장 편한 방법은 FDR로 오늘 데이터를 시도해보는 것)
+def get_company_summary(code):
+    """네이버 금융에서 기업 개요 한 줄 요약을 가져옴"""
     try:
-        # 삼성전자 데이터를 가져와서 마지막 날짜가 오늘인지 확인
-        df = fdr.DataReader('005930', now.strftime('%Y-%m-%d'), now.strftime('%Y-%m-%d'))
-        if df.empty:
-            return False
-        return True
+        url = f"https://finance.naver.com/item/main.naver?code={code}"
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
+        # 'h4' 태그 중 'summary' 관련 내용을 찾거나, description 메타 태그 활용
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(res.text, 'lxml')
+        summary_tag = soup.select_one('.summary_info')
+        if summary_tag:
+            # 첫 번째 문장이나 핵심 내용만 추출
+            text = summary_tag.get_text(separator=' ').strip()
+            # 너무 길면 자름 (한 줄 요약)
+            summary = text.split('\n')[0][:100]
+            return summary
+        else:
+            return "기업 정보 요약을 찾을 수 없습니다."
     except:
-        return False
+        return "정보 로딩 실패"
 
-def main():
-    print("📅 시장 개장 여부 확인 중...")
-    
-    # 1. 공휴일 체크 로직
-    # 평일(월-금)이지만 한국거래소 휴장일인 경우 종료
-    # (단, FDR 데이터 업데이트 시간에 따라 장중에는 데이터가 안 잡힐 수 있으므로 
-    #  안전하게 한국거래소 휴장일 리스트를 체크하는 방식이 좋으나, 
-    #  가장 간단한 건 평일 체크 후 FDR의 응답을 보는 것입니다.)
-    
-    # 실제 개장일 확인이 까다로우므로, 
-    # 5시 실행 시점에 오늘 날짜 데이터가 생성되었는지 확인하는 것이 가장 정확합니다.
-    try:
-        check_df = fdr.DataReader('005930', datetime.now().strftime('%Y%m%d'))
-        if check_df.empty:
-            print("❌ 오늘은 주식시장 휴장일(공휴일)입니다. 프로그램을 종료합니다.")
-            return
-    except:
-        print("❌ 휴장일 판별 중 오류 발생 또는 휴장일입니다.")
-        return
-
-    print("🔍 1단계: 이격도 분석 시작...")
-    df_krx = fdr.StockListing('KRX')
-    df_top500 = df_krx.sort_values(by='Marcap', ascending=False).head(500)
-    
-    codes, names = df_top500['Code'].tolist(), df_top500['Name'].tolist()
-    under_95 = []
-
+def get_disparity_stocks(codes, names, threshold):
+    """특정 이격도 수치(threshold) 이하인 종목 리스트와 요약 반환"""
+    results = []
+    found_any = False
     for i, code in enumerate(codes):
         try:
             df = fdr.DataReader(code).tail(25)
@@ -54,20 +38,51 @@ def main():
             ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
             disp = (curr / ma20) * 100
             
-            if disp <= 95:
-                under_95.append(f"{code},{names[i]}")
+            if disp <= threshold:
+                summary = get_company_summary(code)
+                results.append(f"· **{names[i]}**({code}): {summary}")
+                found_any = True
         except: continue
+    return results, found_any
 
-    # 다음 단계를 위해 파일 저장 (2, 3단계는 이 파일이 있어야 작동함)
-    if under_95:
+def main():
+    # 1. 휴장일 체크
+    try:
+        check_df = fdr.DataReader('005930', datetime.now().strftime('%Y%m%d'))
+        if check_df.empty:
+            requests.post(DISCORD_WEBHOOK_URL, data={'content': "🏝️ 오늘은 주식시장 휴장일입니다. 프로그램을 종료합니다."})
+            return
+    except:
+        return
+
+    print("🔍 1단계 분석 시작 (이격도 90 -> 95)")
+    df_krx = fdr.StockListing('KRX')
+    df_top500 = df_krx.sort_values(by='Marcap', ascending=False).head(500)
+    codes, names = df_top500['Code'].tolist(), df_top500['Name'].tolist()
+
+    # 1차 시도: 90 이하
+    under_stocks, success = get_disparity_stocks(codes, names, 90)
+    current_threshold = 90
+
+    # 2차 시도: 95 이하 (90이 없을 경우)
+    if not success:
+        print("💡 90 이하 없음, 95로 확장 중...")
+        under_stocks, success = get_disparity_stocks(codes, names, 95)
+        current_threshold = 95
+
+    # 결과 전송
+    if success:
+        # 2단계를 위해 코드와 이름만 있는 파일 따로 저장
         with open("targets.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(under_95))
-        requests.post(DISCORD_WEBHOOK_URL, data={'content': f"✅ 1단계 완료: 후보군 {len(under_95)}개 추출됨."})
+            # 파일에는 나중에 검색하기 편하게 코드,이름 형식으로 저장
+            clean_list = [re.sub(r'[^0-9a-zA-Z가-힣,]', '', s.split(':')[0]) for s in under_stocks]
+            f.write("\n".join(clean_list))
+        
+        msg = f"✅ **1단계 완료 (기준: 이격도 {current_threshold}이하)**\n\n" + "\n".join(under_stocks)
+        requests.post(DISCORD_WEBHOOK_URL, data={'content': msg})
     else:
-        # 후보가 없으면 targets.txt를 삭제하여 다음 단계가 실행 안 되게 함
-        if os.path.exists("targets.txt"):
-            os.remove("targets.txt")
-        requests.post(DISCORD_WEBHOOK_URL, data={'content': "ℹ️ 오늘은 이격도 조건에 맞는 종목이 없습니다."})
+        if os.path.exists("targets.txt"): os.remove("targets.txt")
+        requests.post(DISCORD_WEBHOOK_URL, data={'content': f"ℹ️ 오늘은 이격도 95 이하인 종목도 없습니다."})
 
 if __name__ == "__main__":
     main()
