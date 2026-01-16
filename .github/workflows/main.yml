@@ -2,7 +2,7 @@ name: Finup Capture Automation
 
 on:
   schedule:
-    - cron: '0 8 * * 1-5' # 월-금 오후 5시 (한국시간)
+    - cron: '0 8 * * 1-5' # 월-금 오후 5시(한국시간) 실행
   workflow_dispatch: # 수동 실행 버튼
 
 jobs:
