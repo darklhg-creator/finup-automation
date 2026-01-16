@@ -12,12 +12,11 @@ from datetime import datetime, timedelta
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
 def get_oversold_stocks():
-    # 오늘 날짜와 분석 시작일 설정
     now = datetime.now()
     start_date = (now - timedelta(days=60)).strftime('%Y-%m-%d')
     end_date = now.strftime('%Y-%m-%d')
     
-    print(f"{end_date} 기준 시총 상위 1,000위 분석 시작...")
+    print(f"[{end_date}] 시총 상위 1,000위 분석 시작...")
     
     try:
         df_krx = fdr.StockListing('KRX')
@@ -29,39 +28,67 @@ def get_oversold_stocks():
         
         for i, code in enumerate(target_codes):
             try:
-                # 기간을 명시적으로 지정하여 데이터 호출
                 df = fdr.DataReader(code, start=start_date, end=end_date)
                 if len(df) < 20: continue
                 
-                # 20일 이동평균선 (가장 최근 데이터 기준)
-                ma20 = df['Close'].rolling(window=20).mean()
                 current_price = df['Close'].iloc[-1]
-                current_ma20 = ma20.iloc[-1]
-                disparity = (current_price / current_ma20) * 100
+                ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
+                disparity = (current_price / ma20) * 100
                 
-                all_stocks_data.append({
-                    'name': target_names[i],
-                    'code': code,
-                    'disparity': disparity
-                })
+                all_stocks_data.append({'name': target_names[i], 'code': code, 'disparity': disparity})
+                if i % 200 == 0: print(f"진행 중... {i}/1000")
+                time.sleep(0.05) # 서버 부하 방지
             except:
                 continue
         
-        # 필터링
+        # 1순위: 90 이하
         under_90 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data if s['disparity'] <= 90]
-        
         if under_90:
-            return "🎯 [1차 필터: 이격도 90 이하]", under_90
-        else:
-            under_95 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data if s['disparity'] <= 95]
-            # 만약 95 이하도 없다면 상위 5개라도 보여줘서 작동 여부 확인
-            if not under_95:
-                all_stocks_data.sort(key=lambda x: x['disparity'])
-                lowest_5 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data[:5]]
-                return "❓ [조건 미달: 가장 이격도 낮은 종목 5개]", lowest_5
-            return "🔍 [2차 필터: 이격도 95 이하]", under_95
+            return "🎯 [이격도 90 이하 포착]", under_90
+            
+        # 2순위: 95 이하
+        under_95 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data if s['disparity'] <= 95]
+        if under_95:
+            return "🔍 [이격도 95 이하 결과]", under_95
+            
+        # 3순위: 상위 5개 강제 출력
+        all_stocks_data.sort(key=lambda x: x['disparity'])
+        lowest_5 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data[:5]]
+        return "❓ [이격도 최하위 5종목]", lowest_5
 
     except Exception as e:
-        return f"⚠️ 에러: {str(e)}", []
+        print(f"데이터 에러: {e}")
+        return "⚠️ 분석 에러", []
 
-# 나머지 main 함수는 동일하게 유지
+def main():
+    title_text, stocks = get_oversold_stocks()
+    stock_msg = "\n".join(stocks[:25])
+    
+    print("핀업 캡처 시작...")
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--window-size=1920,3000") # 세로 길이를 적당히 조절
+
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+    try:
+        driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
+        time.sleep(15) # 로딩 대기
+        
+        save_path = "capture.png"
+        driver.save_screenshot(save_path)
+        print("캡처 완료. 디스코드 전송 중...")
+        
+        with open(save_path, 'rb') as f:
+            content = f"📈 **주식 장 종료 보고서** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n**{title_text}**\n{stock_msg}\n\n**3️⃣ 핀업 테마 로그**"
+            payload = {'content': content}
+            files = {'file': ('capture.png', f, 'image/png')}
+            res = requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files)
+            print(f"전송 결과: {res.status_code}") # 200~204면 성공
+    finally:
+        driver.quit()
+
+if __name__ == "__main__":
+    main()
