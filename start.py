@@ -12,18 +12,19 @@ from datetime import datetime
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
 def get_oversold_stocks():
-    print("우량주 이격도 분석 시작 (범위: 시총 상위 500위)...")
+    print("우량주 이격도 분석 시작 (범위: 시총 상위 1,000위)...")
     try:
-        # 1. 시가총액 상위 500개 종목 가져오기
+        # 1. 시가총액 상위 1,000개 종목 가져오기
         df_krx = fdr.StockListing('KRX')
-        df_top500 = df_krx.sort_values(by='Marcap', ascending=False).head(500)
-        target_codes = df_top500['Code'].tolist()
-        target_names = df_top500['Name'].tolist()
+        df_top1000 = df_krx.sort_values(by='Marcap', ascending=False).head(1000)
+        target_codes = df_top1000['Code'].tolist()
+        target_names = df_top1000['Name'].tolist()
         
-        all_stocks_data = [] # 모든 분석 데이터를 임시 저장
+        all_stocks_data = []
         
         for i, code in enumerate(target_codes):
             try:
+                # 데이터 수집 (최근 30일치)
                 df = fdr.DataReader(code, periods=30)
                 if len(df) < 20: continue
                 
@@ -40,13 +41,14 @@ def get_oversold_stocks():
             except:
                 continue
         
-        # 2. 필터링 로직 (90 이하 먼저 찾기)
+        # 2. 계층형 필터링 로직
+        # 1순위: 이격도 90 이하
         under_90 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data if s['disparity'] <= 90]
         
         if under_90:
             return "🎯 [1차 필터: 이격도 90 이하 포착]", under_90
         else:
-            # 90 이하가 없으면 95 이하 찾기
+            # 2순위: 90 이하가 없으면 95 이하 검색
             under_95 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data if s['disparity'] <= 95]
             return "🔍 [2차 필터: 이격도 95 이하 검색 결과]", under_95
 
@@ -55,11 +57,11 @@ def get_oversold_stocks():
         return "⚠️ 분석 중 에러 발생", []
 
 def main():
-    # 1. 단계별 종목 분석
+    # 1. 종목 분석
     title_text, stocks = get_oversold_stocks()
-    stock_msg = "\n".join(stocks[:20]) # 최대 20개까지 출력
+    stock_msg = "\n".join(stocks[:25]) # 종목이 많을 수 있으니 최대 25개까지 표시
     
-    # 2. 핀업 캡처 설정
+    # 2. 핀업 캡처
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
@@ -79,9 +81,9 @@ def main():
         save_path = "capture.png"
         driver.save_screenshot(save_path)
         
-        # 3. 디스코드 전송
+        # 3. 디스코드 통합 전송
         with open(save_path, 'rb') as f:
-            content = f"📈 **주식 장 종료 보고서** ({datetime.now().strftime('%Y-%m-%d')})\n\n"
+            content = f"📈 **주식 장 종료 보고서** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
             content += f"**{title_text}**\n"
             content += stock_msg if stock_msg else "조건에 맞는 종목이 없습니다."
             content += "\n\n**3️⃣ 핀업 테마 로그 (아래 이미지)**"
