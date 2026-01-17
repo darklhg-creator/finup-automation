@@ -55,8 +55,10 @@ def main():
             
             requests.post(IGYEOK_WEBHOOK_URL, json={'content': report})
             
-            with open("filtered_targets.txt", "w", encoding="utf-8") as f:
-                f.write("\n".join([r['name'] for r in results]))
+    with open("targets.txt", "w", encoding="utf-8") as f:
+        # '290650,엘앤씨바이오' 이런 형식으로 한 줄씩 저장합니다.
+        lines = [f"{r['code']},{r['name']}" for r in results]
+        f.write("\n".join(lines))
             print(f"✅ 분석 완료!")
         else:
             print("🔍 조건에 맞는 종목이 없습니다.")
