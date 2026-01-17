@@ -3,7 +3,7 @@ name: Stock Analysis Workflow
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 8 * * *'  # UTC 08:30 -> 한국 시간(KST) 17:30
+    - cron: '30 8 * * *'  # 한국 시간(KST) 17:30
 
 jobs:
   build:
@@ -12,11 +12,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # 전체 히스토리를 가져와야 충돌 해결이 쉬워집니다.
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.10' # yfinance 호환성을 위해 3.10 유지
 
       - name: Install dependencies
         run: |
@@ -43,6 +45,12 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 서버의 변경사항을 먼저 가져오고(pull), 내 파일과 합칩니다(rebase).
+          git pull origin main --rebase
+          
           git add .
-          git commit -m "Update stock data" || echo "No changes to commit"
-          git push
+          git commit -m "Update stock data and filtered targets" || echo "No changes to commit"
+          
+          # 충돌이 나더라도 강제로 밀어넣지 않고 안전하게 푸시합니다.
+          git push origin main
