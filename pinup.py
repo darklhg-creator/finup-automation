@@ -8,101 +8,107 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
-THEME_WEBHOOK = "https://discord.com/api/webhooks/1461690207291310185/TGsuiHItgOU3opyA6Z9NPalUSlSwdZFBWIF2EKPfNNHZbmkmiHywHe4UpXXQGB2b3jEo"
+DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
+
+def send_to_discord(file_path, content):
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as f:
+            requests.post(DISCORD_WEBHOOK_URL, data={'content': content}, files={'file': f})
 
 def main():
-    print("🚀 [영역 격리] 다른 테마 이름 배제하고 '진짜 종목'만 추출 시작...")
+    print("⚡ 핀업 개별 테마 '정밀 픽셀 좌표' 추출 시스템 가동...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--window-size=1600,2500')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--window-size=1600,2000') 
+    chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36')
+    
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     
-    final_report = []
-    collected_for_start = [] 
-    today_date = time.strftime("%m월 %d일")
-
     try:
         driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-        time.sleep(12)
+        time.sleep(15)
         
-        # 1. TOP 5 테마 이름 먼저 저장 (나중에 종목이랑 헷갈리지 않게 함)
+        # 1. TOP 5 리스트 확보
         page_text = driver.find_element(By.TAG_NAME, "body").text
         raw_items = re.findall(r'([가-힣A-Za-z/ ]{2,})\n?([+-]?\d+\.\d+%)', page_text)
+        
         top5 = []
-        theme_names_to_exclude = []
         seen = set()
         for name, rate in raw_items:
             clean_name = name.strip()
             if clean_name not in seen and not clean_name.isdigit():
                 val = float(rate.replace('%', ''))
                 top5.append({'name': clean_name, 'rate': rate, 'val': val})
-                theme_names_to_exclude.append(clean_name)
                 seen.add(clean_name)
+        
         top5 = sorted(top5, key=lambda x: x['val'], reverse=True)[:5]
+        print(f"🎯 타겟 확정: {[t['name'] for t in top5]}")
 
-        # 2. 테마별 종목 추출
+        # 2. 개별 테마의 '진짜 좌표'를 찾아서 클릭
         for i, theme in enumerate(top5):
             t_name = theme['name']
-            driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-            time.sleep(8)
-
-            # 테마 클릭
-            pos_script = f"var target='{t_name}'; var els=document.querySelectorAll('tspan,text,div'); for(var el of els){{if(el.textContent.trim()===target){{var r=el.getBoundingClientRect(); return {{x:r.left+r.width/2, y:r.top+r.height/2}};}}}} return null;"
-            pos = driver.execute_script(pos_script)
+            print(f"📡 {i+1}위 정밀 추적 중: {t_name}")
             
-            stocks_info = []
+            # [획기적 스크립트] 텍스트가 포함된 모든 노드를 뒤져서 '실제 위치'를 반환
+            get_real_pos_script = f"""
+            var target = "{t_name}";
+            // 1. 모든 텍스트 노드를 전수조사
+            var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+            var node;
+            while(node = walker.nextNode()) {{
+                if (node.textContent.includes(target)) {{
+                    var range = document.createRange();
+                    range.selectNodeContents(node);
+                    var rect = range.getBoundingClientRect();
+                    // 0,0이 아니고 크기가 있는 진짜 글자 위치라면 반환
+                    if (rect.width > 0 && rect.height > 0) {{
+                        return {{x: rect.left + rect.width/2, y: rect.top + rect.height/2}};
+                    }}
+                }}
+            }}
+            // 2. 만약 실패하면 SVG 텍스트 태그 재조사
+            var svgTexts = document.querySelectorAll('tspan, text');
+            for (var st of svgTexts) {{
+                if (st.textContent.includes(target)) {{
+                    var r = st.getBoundingClientRect();
+                    return {{x: r.left + r.width/2, y: r.top + r.height/2}};
+                }}
+            }}
+            return null;
+            """
+            
+            pos = driver.execute_script(get_real_pos_script)
+            
             if pos:
-                driver.execute_script(f"document.elementFromPoint({pos['x']},{pos['y']}).dispatchEvent(new MouseEvent('click',{{bubbles:true}}));")
-                time.sleep(8)
+                print(f"🎯 {t_name} 진짜 좌표 발견: ({pos['x']}, {pos['y']})")
                 
-                # [핵심 변경] 상세 팝업 영역 안의 텍스트만 추출 (바깥쪽 테마 이름 차단)
-                extract_script = """
-                var btn = Array.from(document.querySelectorAll('*')).find(el => el.textContent.trim() === '테마 상세 >');
-                if(btn) {
-                    // 버튼의 부모 컨테이너를 찾아서 그 안의 텍스트만 반환
-                    var container = btn.closest('div').parentElement;
-                    return container.innerText;
-                }
-                return "";
+                # 강제 관통 클릭 발사
+                click_script = f"""
+                var x = {pos['x']};
+                var y = {pos['y']};
+                var el = document.elementFromPoint(x, y);
+                if (el) {{
+                    ['mousedown', 'click', 'mouseup'].forEach(evt => {{
+                        var e = new MouseEvent(evt, {{bubbles: true, clientX: x, clientY: y}});
+                        el.dispatchEvent(e);
+                    }});
+                }}
                 """
-                detail_area_text = driver.execute_script(extract_script)
+                driver.execute_script(click_script)
                 
-                # 만약 영역 추출 실패 시 대안 (화면 하단 리스트 영역 타겟팅)
-                if not detail_area_text:
-                    detail_area_text = driver.execute_script("return document.querySelector('.theme_detail_list') ? document.querySelector('.theme_detail_list').innerText : '';")
-
-                # 종목명(한글/영문/숫자) + 등락률 매칭
-                matches = re.findall(r'([가-힣A-Za-z0-9&.]{2,15})\s*([+-]?\d+\.\d+%)', detail_area_text)
+                time.sleep(10) # 상세 로딩 대기
+                shot_name = f"top_{i+1}.png"
+                driver.save_screenshot(shot_name)
+                send_to_discord(shot_name, f"✅ **{i+1}위: {t_name}** ({theme['rate']})")
                 
-                s_seen = set()
-                for s_name, s_rate in matches:
-                    clean_s_name = re.sub(r'^\d{1,2}', '', s_name.strip()) # 순위 숫자 제거
-                    
-                    # 테마 리스트에 있는 이름이 아니고(중요!), 중복이 아닐 때만
-                    if clean_s_name and clean_s_name not in theme_names_to_exclude and clean_s_name not in s_seen:
-                        if clean_s_name.isdigit() and len(clean_s_name) <= 3: continue
-                            
-                        stocks_info.append(f"{clean_s_name} {s_rate}")
-                        collected_for_start.append(clean_s_name)
-                        s_seen.add(clean_s_name)
-                    
-                    if len(stocks_info) >= 5: break
-
-            final_report.append({
-                "rank": f"{i+1}위", "sector": f"{t_name} ({theme['rate']})",
-                "stocks": "<br>".join(stocks_info) if stocks_info else "종목 데이터 추출 실패"
-            })
-
-        # 3. 리포트 전송
-        summary_msg = f"## 📅 {today_date} 테마 TOP 5 리포트\n| 순위 | 섹터 | 주요 종목 |\n| :--- | :--- | :--- |\n"
-        for item in final_report:
-            summary_msg += f"| {item['rank']} | **{item['sector']}** | {item['stocks']} |\n"
-        
-        requests.post(THEME_WEBHOOK, json={'content': summary_msg})
-        with open("targets.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(list(set(collected_for_start))))
-        print("✅ 영역 격리 추출 완료!")
+                # 다시 메인으로 복구
+                driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
+                time.sleep(10)
+            else:
+                print(f"⚠️ {t_name}의 진짜 좌표를 찾지 못했습니다.")
 
     except Exception as e:
         print(f"❌ 오류: {e}")
