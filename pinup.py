@@ -10,13 +10,17 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
-def send_to_discord(file_path, content):
-    if os.path.exists(file_path):
+def send_to_discord(content, file_path=None):
+    """텍스트와 이미지를 디스코드로 전송"""
+    payload = {'content': content}
+    if file_path and os.path.exists(file_path):
         with open(file_path, 'rb') as f:
-            requests.post(DISCORD_WEBHOOK_URL, data={'content': content}, files={'file': f})
+            requests.post(DISCORD_WEBHOOK_URL, data=payload, files={'file': f})
+    else:
+        requests.post(DISCORD_WEBHOOK_URL, json=payload)
 
 def main():
-    print("⚡ 핀업 개별 테마 '정밀 픽셀 좌표' 추출 시스템 가동...")
+    print("🚀 핀업 이미지+데이터 통합 추출 시스템 가동...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
@@ -27,11 +31,14 @@ def main():
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     
+    final_report = []
+    today_date = time.strftime("%m월 %d일")
+
     try:
+        # 1. 메인 접속 및 TOP 5 리스트 확보
         driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
         time.sleep(15)
         
-        # 1. TOP 5 리스트 확보
         page_text = driver.find_element(By.TAG_NAME, "body").text
         raw_items = re.findall(r'([가-힣A-Za-z/ ]{2,})\n?([+-]?\d+\.\d+%)', page_text)
         
@@ -47,15 +54,17 @@ def main():
         top5 = sorted(top5, key=lambda x: x['val'], reverse=True)[:5]
         print(f"🎯 타겟 확정: {[t['name'] for t in top5]}")
 
-        # 2. 개별 테마의 '진짜 좌표'를 찾아서 클릭
+        # 2. 개별 테마 상세 분석 (이미지 캡처 + 데이터 추출)
         for i, theme in enumerate(top5):
             t_name = theme['name']
-            print(f"📡 {i+1}위 정밀 추적 중: {t_name}")
+            print(f"🔍 {i+1}위 작업 중: {t_name}")
             
-            # [획기적 스크립트] 텍스트가 포함된 모든 노드를 뒤져서 '실제 위치'를 반환
-            get_real_pos_script = f"""
+            driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
+            time.sleep(12)
+
+            # 정밀 좌표 추출
+            find_pos_script = f"""
             var target = "{t_name}";
-            // 1. 모든 텍스트 노드를 전수조사
             var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
             var node;
             while(node = walker.nextNode()) {{
@@ -63,55 +72,58 @@ def main():
                     var range = document.createRange();
                     range.selectNodeContents(node);
                     var rect = range.getBoundingClientRect();
-                    // 0,0이 아니고 크기가 있는 진짜 글자 위치라면 반환
-                    if (rect.width > 0 && rect.height > 0) {{
-                        return {{x: rect.left + rect.width/2, y: rect.top + rect.height/2}};
-                    }}
-                }}
-            }}
-            // 2. 만약 실패하면 SVG 텍스트 태그 재조사
-            var svgTexts = document.querySelectorAll('tspan, text');
-            for (var st of svgTexts) {{
-                if (st.textContent.includes(target)) {{
-                    var r = st.getBoundingClientRect();
-                    return {{x: r.left + r.width/2, y: r.top + r.height/2}};
+                    if (rect.width > 0) return {{x: rect.left + rect.width/2, y: rect.top + rect.height/2}};
                 }}
             }}
             return null;
             """
+            pos = driver.execute_script(find_pos_script)
             
-            pos = driver.execute_script(get_real_pos_script)
-            
+            stocks_info = []
             if pos:
-                print(f"🎯 {t_name} 진짜 좌표 발견: ({pos['x']}, {pos['y']})")
-                
-                # 강제 관통 클릭 발사
+                # 관통 클릭 실행
                 click_script = f"""
-                var x = {pos['x']};
-                var y = {pos['y']};
-                var el = document.elementFromPoint(x, y);
+                var el = document.elementFromPoint({pos['x']}, {pos['y']});
                 if (el) {{
                     ['mousedown', 'click', 'mouseup'].forEach(evt => {{
-                        var e = new MouseEvent(evt, {{bubbles: true, clientX: x, clientY: y}});
-                        el.dispatchEvent(e);
+                        el.dispatchEvent(new MouseEvent(evt, {{bubbles: true, clientX: {pos['x']}, clientY: {pos['y']}}}));
                     }});
                 }}
                 """
                 driver.execute_script(click_script)
+                time.sleep(10) # 상세 페이지 로딩 대기
                 
-                time.sleep(10) # 상세 로딩 대기
+                # A. 이미지 캡처 및 즉시 전송
                 shot_name = f"top_{i+1}.png"
                 driver.save_screenshot(shot_name)
-                send_to_discord(shot_name, f"✅ **{i+1}위: {t_name}** ({theme['rate']})")
+                send_to_discord(f"📸 **{i+1}위 {t_name} 상세 화면**", shot_name)
                 
-                # 다시 메인으로 복구
-                driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-                time.sleep(10)
-            else:
-                print(f"⚠️ {t_name}의 진짜 좌표를 찾지 못했습니다.")
+                # B. 종목 데이터 추출
+                detail_text = driver.find_element(By.TAG_NAME, "body").text
+                # 종목명(한글/숫자) + 등락률 패턴
+                stock_matches = re.findall(r'([가-힣A-Za-z0-9]+)\s+([+-]?\d+\.\d+%)', detail_text)
+                
+                for s_name, s_rate in stock_matches[:5]: # 상위 5개 종목
+                    stocks_info.append(f"{s_name} {s_rate}")
+
+            # 리포트용 데이터 저장
+            final_report.append({
+                "rank": f"{i+1}위",
+                "sector": f"{t_name} ({theme['rate']})",
+                "stocks": "\n".join(stocks_info) if stocks_info else "데이터 추출 실패"
+            })
+
+        # 3. 최종 요약 리포트 전송
+        summary_msg = f"## 📅 {today_date} 테마 TOP 5 요약 리포트\n"
+        summary_msg += "| 순위 | 섹터 | 주요 종목 |\n| :--- | :--- | :--- |\n"
+        for item in final_report:
+            summary_msg += f"| {item['rank']} | **{item['sector']}** | {item['stocks'].replace('\\n', '<br>')} |\n"
+        
+        send_to_discord(summary_msg)
+        print("✅ 모든 작업 완료!")
 
     except Exception as e:
-        print(f"❌ 오류: {e}")
+        print(f"❌ 오류 발생: {e}")
     finally:
         driver.quit()
 
