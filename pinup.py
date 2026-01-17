@@ -6,89 +6,68 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
-DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
-
-def send_image_to_discord(file_path, content):
-    with open(file_path, 'rb') as f:
-        requests.post(DISCORD_WEBHOOK_URL, data={'content': content}, files={'file': f})
-
 def main():
-    print("🚀 핀업 테마로그 수치 상위 5개 섹터 정밀 추적 시작...")
+    print("🔍 핀업 히트맵에서 TOP 5 테마 추출 시작...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--window-size=1400,2000') # 캡처 영역 확보를 위해 높이 증가
+    chrome_options.add_argument('--window-size=1600,1200')
     chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36')
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-    wait = WebDriverWait(driver, 25)
     
     try:
+        # 1. 대상 주소 접속
         driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-        time.sleep(15) # 전체 데이터 로딩 대기
+        time.sleep(15) # 맵이 완전히 그려질 때까지 충분히 대기
 
-        # 1. 화면의 모든 테마 박스 수집
-        items = driver.find_elements(By.CSS_SELECTOR, ".item, [class*='ThemeItem']")
+        # 2. 히트맵 내의 모든 테마 블록 찾기
+        # 이미지상 빨간색/파란색 박스들은 보통 특정 클래스를 공유합니다.
+        # 텍스트와 숫자가 같이 들어있는 요소들을 수집합니다.
+        themes = driver.find_elements(By.XPATH, "//*[contains(@class, 'item')] | //*[contains(@class, 'theme')]")
         
-        theme_list = []
-        for item in items:
+        extracted_data = []
+        
+        for theme in themes:
             try:
-                name = item.find_element(By.CSS_SELECTOR, ".name").text.strip()
-                rate_text = item.find_element(By.CSS_SELECTOR, ".rate").text.strip()
-                
-                # 수치 추출 (예: "+15.2%" -> 15.2)
-                val = float(re.sub(r'[^0-9.-]', '', rate_text))
-                
-                theme_list.append({
-                    'element': item, 
-                    'name': name, 
-                    'rate': rate_text, 
-                    'val': val 
-                })
+                # 박스 내부의 텍스트 전체를 가져옴 (예: "자동차 부품\n+19.15%")
+                full_text = theme.text.strip()
+                if '%' in full_text:
+                    # 줄바꿈이나 공백으로 분리
+                    lines = full_text.split('\n')
+                    name = lines[0].strip()
+                    rate_text = lines[1].strip() if len(lines) > 1 else lines[0]
+                    
+                    # 숫자만 추출 (정렬용)
+                    rate_val = float(re.sub(r'[^0-9.-]', '', rate_text))
+                    
+                    # 중복 제거 및 유효한 이름만 저장
+                    if name and len(name) < 15:
+                        extracted_data.append({'name': name, 'rate': rate_text, 'val': rate_val})
             except:
                 continue
 
-        # 2. 수치(val)가 높은 순서대로 상위 5개 정렬 (단순 내림차순)
-        top5 = sorted(theme_list, key=lambda x: x['val'], reverse=True)[:5]
-        
-        if not top5:
-            print("❌ 상위 섹터 데이터를 추출하지 못했습니다.")
-            return
+        # 3. 수치(% )가 높은 순서대로 상위 5개 정렬
+        # 중복 데이터 정제
+        unique_data = {d['name']: d for d in extracted_data}.values()
+        top5 = sorted(unique_data, key=lambda x: x['val'], reverse=True)[:5]
 
-        print(f"📊 타겟팅된 상위 5개 섹터: {[t['name'] for t in top5]}")
+        print("\n🏆 [추출 결과 - TOP 5]")
+        print("--------------------------------")
+        for i, t in enumerate(top5):
+            print(f"{i+1}위: {t['name']} ({t['rate']})")
+        print("--------------------------------\n")
 
-        # 3. 상위 5개 순차 클릭 및 캡처
-        for i, theme in enumerate(top5):
-            try:
-                print(f"📸 {i+1}위 캡처 중: {theme['name']} ({theme['rate']})")
-                
-                # 가림 방지를 위해 중앙 정렬
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", theme['element'])
-                time.sleep(2)
-                
-                # 강제 클릭 (JS 방식이 가장 확실함)
-                driver.execute_script("arguments[0].click();", theme['element'])
-                
-                # 하단 종목 리스트가 완전히 바뀔 때까지 넉넉히 대기
-                time.sleep(10) 
-                
-                file_name = f"top_{i+1}.png"
-                driver.save_screenshot(file_name)
-                
-                # 디코 전송
-                send_image_to_discord(file_name, f"✅ **{i+1}위: {theme['name']}** ({theme['rate']})")
-                
-            except Exception as e:
-                print(f"⚠️ {theme['name']} 처리 중 오류: {e}")
+        # 확인용 스크린샷 저장
+        driver.save_screenshot("map_check.png")
+        print("📸 현재 맵 화면을 map_check.png로 저장했습니다.")
 
     except Exception as e:
-        print(f"❌ 전체 오류 발생: {e}")
+        print(f"❌ 오류 발생: {e}")
     finally:
         driver.quit()
 
