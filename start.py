@@ -6,7 +6,7 @@ from datetime import datetime
 IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
 
 def main():
-    print("🚀 [1단계] 정밀 분석 시작 (KOSPI 500 + KOSDAQ 500)")
+    print("🚀 [1단계] 정밀 분석 시작 (KOSPI 50 + KOSDAQ 50)")
     
     try:
         # [추가] 휴장일 체크: 삼성전자 데이터를 통해 오늘 장이 열렸는지 확인
@@ -21,8 +21,8 @@ def main():
             #return # 프로그램 종료
 
         # 1. 대상 종목 선정
-        df_kospi = fdr.StockListing('KOSPI').head(500)
-        df_kosdaq = fdr.StockListing('KOSDAQ').head(500)
+        df_kospi = fdr.StockListing('KOSPI').head(50)
+        df_kosdaq = fdr.StockListing('KOSDAQ').head(50)
         df_total = pd.concat([df_kospi, df_kosdaq])
         
         results = []
