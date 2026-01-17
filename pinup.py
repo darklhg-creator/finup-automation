@@ -128,3 +128,6 @@ def main():
         print(f"❌ 오류 발생: {e}")
     finally:
         driver.quit()
+
+if __name__ == "__main__":
+    main()
