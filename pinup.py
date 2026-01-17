@@ -1,6 +1,7 @@
 import os
 import time
 import requests
+import re
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -16,57 +17,68 @@ def send_image_to_discord(file_path, content):
         requests.post(DISCORD_WEBHOOK_URL, data={'content': content}, files={'file': f})
 
 def main():
-    print("📸 핀업 테마로그 5단계 정밀 클릭 캡처 시작...")
+    print("🚀 핀업 히트맵 상위 5개 섹터 자동 감지 시작...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--window-size=1200,1600') # 높이를 좀 더 키움
+    chrome_options.add_argument('--window-size=1400,1600')
     chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-    wait = WebDriverWait(driver, 20)
+    wait = WebDriverWait(driver, 25)
     
     try:
         driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-        time.sleep(15) # 초기 로딩을 아주 넉넉하게 줌
+        time.sleep(15) # 전체 로딩 대기
 
-        # [방해 요소 제거] 상단 배너나 팝업 등이 클릭을 방해하지 못하도록 삭제
-        driver.execute_script("""
-            var ads = document.querySelectorAll('.banner, .modal, .popup, [class*="event"]');
-            ads.forEach(function(ad) { ad.remove(); });
-        """)
-
-        sectors = ["자동차 부품", "정원오", "탈모", "로봇", "제약/바이오"]
+        # 1. 모든 테마 아이템 수집
+        # 핀업 테마로그의 각 박스 요소들을 가져옵니다.
+        items = driver.find_elements(By.CSS_SELECTOR, ".item, [class*='ThemeItem']")
         
-        for i, name in enumerate(sectors):
+        theme_data = []
+        for item in items:
             try:
-                print(f"🔍 {i+1}순위 '{name}' 섹터 시도 중...")
-                
-                # 텍스트가 포함된 요소를 더 정밀하게 찾음
-                xpath = f"//*[self::div or self::span or self::a][normalize-space()='{name}']"
-                target_element = wait.until(EC.presence_of_element_located((By.XPATH, xpath)))
-                
-                # 화면 중앙 정렬 및 가림 방지
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_element)
-                time.sleep(2)
+                name = item.find_element(By.CSS_SELECTOR, ".name").text.strip()
+                rate_str = item.find_element(By.CSS_SELECTOR, ".rate").text.strip()
+                # '+15.2%' 등에서 숫자만 추출하여 정렬 기준으로 사용
+                rate_val = float(re.sub(r'[^0-9.-]', '', rate_str))
+                theme_data.append({'element': item, 'name': name, 'rate': rate_str, 'val': rate_val})
+            except:
+                continue
 
-                # 일반 클릭 대신 자바스크립트로 강제 클릭 (배너가 가려도 뚫고 클릭함)
-                driver.execute_script("arguments[0].click();", target_element)
+        # 2. 등락률(% 수치) 높은 순으로 상위 5개 정렬
+        top5 = sorted(theme_data, key=lambda x: x['val'], reverse=True)[:5]
+        
+        if not top5:
+            print("❌ 상위 섹터를 추출하지 못했습니다. 화면 구성을 다시 확인합니다.")
+            driver.save_screenshot("debug_main.png")
+            send_image_to_discord("debug_main.png", "❌ 데이터 추출 실패 당시 화면")
+            return
+
+        print(f"✅ 감지된 상위 5개: {[t['name'] for t in top5]}")
+
+        # 3. 상위 5개 순차 클릭 및 캡처
+        for i, theme in enumerate(top5):
+            try:
+                print(f"📸 {i+1}위 클릭 중: {theme['name']} ({theme['rate']})")
                 
-                # 클릭 후 페이지가 갱신되는 시간을 넉넉히 줌 (핵심!)
-                time.sleep(7) 
+                # 가림 현상 방지를 위해 해당 요소로 스크롤
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", theme['element'])
+                time.sleep(2)
                 
-                file_name = f"step_{i+1}_{name.replace('/', '_')}.png"
+                # 자바스크립트로 직접 클릭 (안정적임)
+                driver.execute_script("arguments[0].click();", theme['element'])
+                time.sleep(7) # 하단 종목 리스트 렌더링 대기
+                
+                file_name = f"top_{i+1}.png"
                 driver.save_screenshot(file_name)
-                send_image_to_discord(file_name, f"✅ {i+1}단계 캡처 성공: **{name}**")
+                
+                send_image_to_discord(file_name, f"🔥 **{i+1}위: {theme['name']}** ({theme['rate']})")
                 
             except Exception as e:
-                print(f"⚠️ {name} 클릭 실패: {e}")
-                fail_img = f"fail_{i+1}.png"
-                driver.save_screenshot(fail_img)
-                send_image_to_discord(fail_img, f"❌ {name} 클릭 실패 (방해 요소 확인용 스냅샷)")
+                print(f"⚠️ {theme['name']} 캡처 실패: {e}")
 
     except Exception as e:
         print(f"❌ 전체 오류: {e}")
