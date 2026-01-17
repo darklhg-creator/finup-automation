@@ -1,82 +1,84 @@
-import requests
 import FinanceDataReader as fdr
-import pandas as pd
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
-import time
+import requests
 import os
+import pandas as pd
 from datetime import datetime
 
-DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
+# 이격도 채널 웹훅
+IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
 
-def get_oversold_stocks():
-    print("🔍 통합 시총 상위 500위 분석 시작 (코스피/코스닥 포함)...")
-    try:
-        # 시장 구분 없이 통합 시총 상위 500개 추출
-        df_krx = fdr.StockListing('KRX')
-        df_top500 = df_krx.sort_values(by='Marcap', ascending=False).head(500)
-        target_codes = df_top500['Code'].tolist()
-        target_names = df_top500['Name'].tolist()
-        
-        all_stocks_data = []
-        
-        for i, code in enumerate(target_codes):
-            try:
-                # 최근 25일치 데이터만 가져와서 속도 최적화 ⚡
-                df = fdr.DataReader(code).tail(25)
-                if len(df) < 20: continue
-                
-                # 이격도 계산
-                current_price = df['Close'].iloc[-1]
-                ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
-                disparity = (current_price / ma20) * 100
-                
-                all_stocks_data.append({'name': target_names[i], 'code': code, 'disparity': disparity})
-                
-                # 100개마다 진행 상황 출력
-                if (i + 1) % 100 == 0: print(f"✅ {i+1}/500 종목 분석 완료")
-            except:
-                continue
-        
-        # 필터링 및 결과 정리
-        all_stocks_data.sort(key=lambda x: x['disparity'])
-        under_95 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data if s['disparity'] <= 95]
-        
-        if under_95:
-            return "🔍 [이격도 95 이하 포착]", under_95
-        
-        lowest_5 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data[:5]]
-        return "❓ [이격도 최하위 5종목]", lowest_5
+def get_stock_data(target_names, df_krx, threshold):
+    """지정한 이격도(threshold) 이하인 종목들을 추출합니다."""
+    results = []
+    for name in target_names:
+        try:
+            row = df_krx[df_krx['Name'] == name]
+            if row.empty: continue
+            
+            code = row['Code'].values[0]
+            sector = row['Sector'].values[0] if 'Sector' in row.columns else "분류없음"
+            industry = row['Industry'].values[0] if 'Industry' in row.columns else "내용없음"
+            
+            # 주가 데이터 수집 (최근 40일치)
+            df = fdr.DataReader(code).tail(40)
+            if len(df) < 20: continue
+            
+            # 이격도 계산
+            current_price = df['Close'].iloc[-1]
+            ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
+            disparity = round((current_price / ma20) * 100, 1)
 
-    except Exception as e:
-        print(f"❌ 데이터 에러: {e}")
-        return "⚠️ 분석 중 오류 발생", []
+            # 설정한 기준값 이하인 경우만 수집
+            if disparity <= threshold:
+                results.append({
+                    'name': name,
+                    'price': current_price,
+                    'disparity': disparity,
+                    'desc': f"[{sector}] {str(industry)[:30]}..."
+                })
+        except:
+            continue
+    return results
 
 def main():
-    title_text, stocks = get_oversold_stocks()
-    stock_msg = "\n".join(stocks[:25])
+    print("🚀 [테스트 모드] 이격도 분석을 시작합니다. (휴장일 체크 건너뜀)")
     
-    print("📸 핀업 테마 로그 캡처 시작...")
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    # 1. KRX 상장사 정보 로드
+    df_krx = fdr.StockListing('KRX')
+    
+    # 분석 대상 로드 (targets.txt 기반)
+    if os.path.exists("targets.txt"):
+        with open("targets.txt", "r", encoding="utf-8") as f:
+            target_names = [line.strip() for line in f.readlines() if line.strip()]
+    else:
+        print("❌ targets.txt 파일이 없습니다. 먼저 pinup.py 등을 통해 파일을 생성해주세요.")
+        return
 
-    try:
-        driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-        time.sleep(12) # 페이지 로딩 대기
-        save_path = "capture.png"
-        driver.save_screenshot(save_path)
+    # 2. 이격도 검색 (1순위: 90 이하)
+    print("🔍 1차 검색 중: 이격도 90 이하...")
+    final_results = get_stock_data(target_names, df_krx, 90)
+    
+    # 90 이하가 없으면 2순위 검색 (95 이하)
+    if not final_results:
+        print("🔍 2차 검색 중: 이격도 90 이하가 없어 95 이하로 검색합니다.")
+        final_results = get_stock_data(target_names, df_krx, 95)
+
+    # 3. 결과 알림
+    if final_results:
+        # 이격도 낮은 순 정렬
+        final_results = sorted(final_results, key=lambda x: x['disparity'])
         
-        with open(save_path, 'rb') as f:
-            content = f"📈 **주식 장 종료 보고서**\n\n**{title_text}**\n{stock_msg}\n\n**3️⃣ 핀업 테마 로그**"
-            requests.post(DISCORD_WEBHOOK_URL, data={'content': content}, files={'file': f})
-            print("🏁 모든 작업 성공 및 디스코드 전송 완료!")
-    finally:
-        driver.quit()
+        # 메시지 작성
+        report = f"## 📈 1단계 이격도 분석 결과 ({'90이하' if any(r['disparity']<=90 for r in final_results) else '95이하'})\n"
+        report += "| 종목명 | 현재가 | 이격도 | 종목 설명 |\n| :--- | :--- | :--- | :--- |\n"
+        
+        for r in final_results:
+            report += f"| {r['name']} | {int(r['price']):,}원 | **{r['disparity']}** | {r['desc']} |\n"
+        
+        requests.post(IGYEOK_WEBHOOK_URL, json={'content': report})
+        print(f"✅ 분석 완료! {len(final_results)}개 종목 전송 성공")
+    else:
+        print("🔍 분석 조건(이격도 95 이하)에 맞는 종목이 하나도 없습니다.")
 
 if __name__ == "__main__":
     main()
