@@ -5,66 +5,53 @@ import re
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
 def main():
-    print("🔍 핀업 히트맵에서 TOP 5 테마 추출 시작...")
+    print("📸 1. 핀업 테마로그 화면 캡처 중...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1600,1200')
-    chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36')
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     
     try:
-        # 1. 대상 주소 접속
+        # 주소 접속
         driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-        time.sleep(15) # 맵이 완전히 그려질 때까지 충분히 대기
+        time.sleep(15) # 화면이 다 뜰 때까지 대기
+        
+        # 화면 전체 캡처 (증거 및 분석용)
+        driver.save_screenshot("screenshot.png")
+        print("✅ 2. 캡처 완료. 화면에서 텍스트 추출을 시작합니다.")
 
-        # 2. 히트맵 내의 모든 테마 블록 찾기
-        # 이미지상 빨간색/파란색 박스들은 보통 특정 클래스를 공유합니다.
-        # 텍스트와 숫자가 같이 들어있는 요소들을 수집합니다.
-        themes = driver.find_elements(By.XPATH, "//*[contains(@class, 'item')] | //*[contains(@class, 'theme')]")
+        # 캡처된 화면의 '요소'들을 텍스트 위주로 긁어모음 (이미지 기반 인식의 첫 단계)
+        body_text = driver.find_element(By.TAG_NAME, "body").text
+        
+        # 텍스트에서 [테마명] + [%수치] 패턴을 찾음
+        # 예: "자동차 부품 +19.15%" 같은 형태를 모두 찾음
+        pattern = r'([가-힣A-Za-z0-9/ ]+)\n?([+-]?\d+\.\d+%)'
+        matches = re.findall(pattern, body_text)
         
         extracted_data = []
-        
-        for theme in themes:
-            try:
-                # 박스 내부의 텍스트 전체를 가져옴 (예: "자동차 부품\n+19.15%")
-                full_text = theme.text.strip()
-                if '%' in full_text:
-                    # 줄바꿈이나 공백으로 분리
-                    lines = full_text.split('\n')
-                    name = lines[0].strip()
-                    rate_text = lines[1].strip() if len(lines) > 1 else lines[0]
-                    
-                    # 숫자만 추출 (정렬용)
-                    rate_val = float(re.sub(r'[^0-9.-]', '', rate_text))
-                    
-                    # 중복 제거 및 유효한 이름만 저장
-                    if name and len(name) < 15:
-                        extracted_data.append({'name': name, 'rate': rate_text, 'val': rate_val})
-            except:
-                continue
+        for name, rate in matches:
+            # 수치에서 숫자만 뽑아 정렬용 값으로 변환
+            val = float(rate.replace('%', ''))
+            extracted_data.append({'name': name.strip(), 'rate': rate, 'val': val})
 
-        # 3. 수치(% )가 높은 순서대로 상위 5개 정렬
-        # 중복 데이터 정제
-        unique_data = {d['name']: d for d in extracted_data}.values()
-        top5 = sorted(unique_data, key=lambda x: x['val'], reverse=True)[:5]
+        # 큰 순서대로 정렬 (내림차순)
+        top5 = sorted(extracted_data, key=lambda x: x['val'], reverse=True)[:5]
 
-        print("\n🏆 [추출 결과 - TOP 5]")
-        print("--------------------------------")
-        for i, t in enumerate(top5):
-            print(f"{i+1}위: {t['name']} ({t['rate']})")
-        print("--------------------------------\n")
-
-        # 확인용 스크린샷 저장
-        driver.save_screenshot("map_check.png")
-        print("📸 현재 맵 화면을 map_check.png로 저장했습니다.")
+        print("\n📊 [정리 결과: 상위 5개 섹터]")
+        print("=" * 30)
+        if not top5:
+            print("데이터를 추출하지 못했습니다. 화면 구성을 다시 확인 중입니다.")
+        else:
+            for i, item in enumerate(top5):
+                print(f"{i+1}위: {item['name']} ({item['rate']})")
+        print("=" * 30)
 
     except Exception as e:
         print(f"❌ 오류 발생: {e}")
