@@ -1,9 +1,9 @@
 name: Stock Analysis Workflow
 
 on:
-  workflow_dispatch:      # 이 줄이 있으면 GitHub에 'Run workflow' 버튼이 생깁니다!
+  workflow_dispatch:
   schedule:
-    - cron: '0 8 * * 1-5'  # 월~금 오후 5시 자동 실행
+    - cron: '0 8 * * 1-5'
 
 jobs:
   build:
