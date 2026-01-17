@@ -111,14 +111,18 @@ def main():
                     s_seen.add(line)
                     if len(stocks_info) >= 5: break
 
+          # ... (앞부분 동일) ...
+
             final_report.append({
                 "rank": f"{i+1}위",
                 "sector": f"{t_name} ({theme['rate']})",
-                "stocks": "<br>".join(stocks_info) if stocks_info else "데이터 추출 실패"
+                # 여기서 <br>을 / 로 변경했습니다.
+                "stocks": " / ".join(stocks_info) if stocks_info else "데이터 추출 실패"
             })
 
         # 3. 리포트 전송
         summary_msg = f"## 📅 {today_date} 테마 TOP 5 리포트\n"
+        # 표의 너비가 넓어질 수 있으므로, 마크다운 표 형식을 유지합니다.
         summary_msg += "| 순위 | 섹터 | 주요 종목 |\n| :--- | :--- | :--- |\n"
         for item in final_report:
             summary_msg += f"| {item['rank']} | **{item['sector']}** | {item['stocks']} |\n"
@@ -128,12 +132,6 @@ def main():
         with open("targets.txt", "w", encoding="utf-8") as f:
             f.write("\n".join(list(set(collected_for_start))))
             
-        print("✅ 모든 작업이 성공적으로 완료되었습니다!")
+        print("✅ 모든 작업 완료! 이제 종목들이 '/'로 구분되어 전송됩니다.")
 
-    except Exception as e:
-        print(f"❌ 오류 발생: {e}")
-    finally:
-        driver.quit()
-
-if __name__ == "__main__":
-    main()
+# ... (뒷부분 동일) ...
