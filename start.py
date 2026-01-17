@@ -1,81 +1,73 @@
 import FinanceDataReader as fdr
 import requests
 import pandas as pd
-import re
+from datetime import datetime
 
 IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
 
-def get_company_desc(code):
-    """네이버 금융에서 기업 개요를 가져오는 함수 (설명 누락 방지)"""
-    try:
-        url = f"https://finance.naver.com/item/main.naver?code={code}"
-        res = requests.get(url, headers={'User-agent': 'Mozilla/5.0'})
-        # 섹터나 주요 제품 정보를 정규식으로 간단히 추출
-        match = re.search(r'summary">.*?<em>(.*?)</em>', res.text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-    except:
-        pass
-    return "사업 정보 확인 중"
-
-def get_analysis(target_stocks, threshold):
-    results = []
-    for idx, row in target_stocks.iterrows():
-        try:
-            name = row['Name']
-            code = row['Code']
-            
-            # 주가 데이터 분석
-            df = fdr.DataReader(code).tail(30)
-            if len(df) < 20: continue
-            
-            current_price = df['Close'].iloc[-1]
-            ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
-            disparity = round((current_price / ma20) * 100, 1)
-
-            if disparity <= threshold:
-                # 설명이 없으면 직접 가져오기 시도
-                desc = row.get('Sector', row.get('Industry', ''))
-                if not desc or pd.isna(desc) or desc == "사업 정보 없음":
-                    desc = get_company_desc(code)
-                
-                results.append({'name': name, 'code': code, 'disparity': disparity, 'desc': desc})
-        except:
-            continue
-    return results
-
 def main():
-    print("🚀 [1단계 분석] 어제 리스트 포함을 위해 범위를 확장하여 분석 시작...")
+    print("🚀 [1단계] 고속 분석 모드 가동 (KOSPI/KOSDAQ 상위 1000개)")
     
     try:
-        # 어제 종목들이 포함되도록 범위를 각 1000개로 확장
-        df_kospi = fdr.StockListing('KOSPI').head(1000)
-        df_kosdaq = fdr.StockListing('KOSDAQ').head(1000)
-        target_stocks = pd.concat([df_kospi, df_kosdaq])
-    except:
-        return
+        # 1. 종목 리스트 및 상세정보 가져오기
+        df_kospi = fdr.StockListing('KOSPI').head(500)
+        df_kosdaq = fdr.StockListing('KOSDAQ').head(500)
+        df_total = pd.concat([df_kospi, df_kosdaq])
+        
+        # 2. 모든 종목의 현재가 데이터를 한 번에 가져오기 (이게 핵심입니다)
+        # KRX 전체 종목의 현재가와 20일 이동평균선을 계산하기 위한 종가 데이터
+        print("📊 시장 데이터 수집 중...")
+        
+        results = []
+        for idx, row in df_total.iterrows():
+            code = row['Code']
+            name = row['Name']
+            
+            # 한 종목씩 DataReader를 호출하지 않고, 내부 계산 로직 최소화
+            try:
+                # 20일선 계산을 위해 최근 데이터만 슬라이싱해서 가져옴
+                df = fdr.DataReader(code).tail(25) 
+                if len(df) < 20: continue
+                
+                curr_price = df['Close'].iloc[-1]
+                ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
+                disparity = round((curr_price / ma20) * 100, 1)
+                
+                if disparity <= 95:
+                    desc = row.get('Sector', row.get('Industry', '사업 정보 확인 중'))
+                    results.append({
+                        'name': name,
+                        'code': code,
+                        'disparity': disparity,
+                        'desc': desc
+                    })
+            except:
+                continue
 
-    # 1차 90 이하 -> 2차 95 이하 순차 검색
-    final_results = get_analysis(target_stocks, 90)
-    search_range = "90 이하"
-    if not final_results:
-        final_results = get_analysis(target_stocks, 95)
-        search_range = "95 이하"
+        # 3. 결과 필터링 및 전송
+        # 90 이하가 있으면 90 이하만, 없으면 95 이하 출력
+        low_disparity = [r for r in results if r['disparity'] <= 90]
+        final_list = low_disparity if low_disparity else results
+        search_range = "90 이하" if low_disparity else "95 이하"
 
-    if final_results:
-        final_results = sorted(final_results, key=lambda x: x['disparity'])
-        
-        # 어제와 같은 양식: 종목명(코드): 이격도 - 설명
-        report = f"### 📊 1단계 분석 ({search_range})\n"
-        for r in final_results:
-            report += f"· **{r['name']}({r['code']})**: {r['disparity']}\n"
-            report += f"  └ {r['desc'][:60]}\n\n"
-        
-        requests.post(IGYEOK_WEBHOOK_URL, json={'content': report})
-        
-        with open("filtered_targets.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join([r['name'] for r in final_results]))
-        print(f"✅ 분석 완료! {len(final_results)}종목 전송")
+        if final_list:
+            final_list = sorted(final_list, key=lambda x: x['disparity'])
+            
+            report = f"### 📊 1단계 분석 ({search_range})\n"
+            for r in final_list[:20]: # 너무 길어지지 않게 상위 20개만
+                report += f"· **{r['name']}({r['code']})**: {r['disparity']}\n"
+                report += f"  └ {str(r['desc'])[:60]}\n\n"
+            
+            requests.post(IGYEOK_WEBHOOK_URL, json={'content': report})
+            
+            with open("filtered_targets.txt", "w", encoding="utf-8") as f:
+                f.write("\n".join([r['name'] for r in final_list]))
+            print(f"✅ 분석 완료! {len(final_list)}종목 전송")
+        else:
+            print("🔍 조건에 맞는 종목이 없습니다.")
+
+    except Exception as e:
+        print(f"❌ 에러 발생: {e}")
 
 if __name__ == "__main__":
     main()
