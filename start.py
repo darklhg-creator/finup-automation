@@ -1,7 +1,7 @@
 import FinanceDataReader as fdr
 import requests
 import pandas as pd
-import time
+from datetime import datetime
 
 IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
 
@@ -9,13 +9,24 @@ def main():
     print("🚀 [1단계] 정밀 분석 시작 (KOSPI 500 + KOSDAQ 500)")
     
     try:
+        # [추가] 휴장일 체크: 삼성전자 데이터를 통해 오늘 장이 열렸는지 확인
+        check_df = fdr.DataReader('005930').tail(1)
+        last_date = check_df.index[-1].strftime('%Y-%m-%d')
+        today_date = datetime.now().strftime('%Y-%m-%d')
+
+        if last_date != today_date:
+            msg = f"📅 오늘은 주식 시장 휴무일입니다. ({today_date})"
+            print(msg)
+            requests.post(IGYEOK_WEBHOOK_URL, json={'content': msg})
+            return # 프로그램 종료
+
         # 1. 대상 종목 선정
         df_kospi = fdr.StockListing('KOSPI').head(500)
         df_kosdaq = fdr.StockListing('KOSDAQ').head(500)
         df_total = pd.concat([df_kospi, df_kosdaq])
         
         results = []
-        print(f"📡 총 {len(df_total)}개 종목의 20일선 정밀 분석 중...")
+        print(f"📡 총 {len(df_total)}개 종목 분석 중...")
 
         for idx, row in df_total.iterrows():
             code = row['Code']
@@ -26,7 +37,6 @@ def main():
                 df = fdr.DataReader(code).tail(30)
                 if len(df) < 20: continue
                 
-                # 정밀 계산
                 current_price = df['Close'].iloc[-1]
                 ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
                 disparity = round((current_price / ma20) * 100, 1)
@@ -35,14 +45,10 @@ def main():
                     results.append({'name': name, 'code': code, 'disparity': disparity})
             except:
                 continue
-            
-            # 서버 부하 방지를 위한 미세한 간격 (필요시 조절)
-            # time.sleep(0.01)
 
         # 2. 결과 정렬 및 전송
         if results:
             results = sorted(results, key=lambda x: x['disparity'])
-            
             report = f"### 📊 1단계 정밀 분석 결과\n"
             for r in results[:20]:
                 report += f"· **{r['name']}({r['code']})**: {r['disparity']}\n"
@@ -51,7 +57,7 @@ def main():
             
             with open("filtered_targets.txt", "w", encoding="utf-8") as f:
                 f.write("\n".join([r['name'] for r in results]))
-            print(f"✅ 분석 완료! {len(results)}종목 전송")
+            print(f"✅ 분석 완료!")
         else:
             print("🔍 조건에 맞는 종목이 없습니다.")
 
