@@ -1,61 +1,52 @@
 import FinanceDataReader as fdr
 import requests
 import pandas as pd
-from datetime import datetime
 
 IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
 
 def main():
-    print("🚀 [1단계] 초고속 전 종목 스캔 모드 가동...")
+    print("🚀 [1단계] 코스피 500 + 코스닥 500 통합 분석 시작...")
     
     try:
-        # 1. 전 종목 리스트 로드 (상세정보 포함)
-        df_krx = fdr.StockListing('KRX')
+        # 1. 시장별로 상위 500개씩 가져와서 합치기
+        df_kospi = fdr.StockListing('KOSPI').head(500)
+        df_kosdaq = fdr.StockListing('KOSDAQ').head(500)
+        df_total = pd.concat([df_kospi, df_kosdaq])
         
-        # 2. 전 종목 시세 한 번에 로드 (이게 핵심! 개별 API 호출 안 함)
-        # 마지막 영업일 기준 전체 종목 가격 데이터
-        print("📊 시장 전체 시세 로드 중... (약 5~10초)")
-        df_prices = fdr.StockListing('KRX-MARCAP') # 시가총액/가격 정보 덤프
-        
-        # 3. 데이터 병합 및 계산
-        # 20일 이동평균을 구하기 위해 최근 20일치 코스피/코스닥 지수 흐름을 참고하는 대신
-        # 간단하고 빠르게 '현재가'와 '20일 전 가격'의 평균을 계산하는 효율적 로직 적용
         results = []
-        
-        # 속도를 위해 상위 1000개(시총순)만 빠르게 필터링
-        target_df = df_krx.head(1000)
+        print(f"📡 총 {len(df_total)}개 종목 분석 중...")
 
-        for idx, row in target_df.iterrows():
-            code = row['Code']
-            name = row['Name']
-            
+        for idx, row in df_total.iterrows():
             try:
-                # 개별 종목 20일 데이터 로드 (최소한의 기간만)
+                code = row['Code']
+                name = row['Name']
+                
+                # 20일 데이터 로드 및 이격도 계산
                 df = fdr.DataReader(code).tail(25)
                 if len(df) < 20: continue
                 
                 curr_price = df['Close'].iloc[-1]
                 ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
                 disparity = round((curr_price / ma20) * 100, 1)
-                
+
+                # 95 이하 종목 수집
                 if disparity <= 95:
-                    desc = row.get('Sector', row.get('Industry', '사업 정보 확인 중'))
                     results.append({
-                        'name': name, 'code': code, 'disparity': disparity, 'desc': desc
+                        'name': name, 
+                        'code': code, 
+                        'disparity': disparity
                     })
             except:
                 continue
 
-        # 4. 결과 정렬 및 전송
+        # 2. 결과 정렬 및 전송 (요청하신 심플 양식)
         if results:
-            # 이격도 낮은 순 정렬
             results = sorted(results, key=lambda x: x['disparity'])
             
-            # 어제 양식 복구
-            report = f"### 📊 1단계 분석 (이격도 순)\n"
-            for r in results[:15]:
+            report = f"### 📊 1단계 분석 결과 (코스피/코스닥 TOP 500)\n"
+            for r in results[:20]: # 상위 20개 출력
+                # 불필요한 정보 없이 종목명, 코드, 이격도만 표시
                 report += f"· **{r['name']}({r['code']})**: {r['disparity']}\n"
-                report += f"  └ {str(r['desc'])[:60]}\n\n"
             
             requests.post(IGYEOK_WEBHOOK_URL, json={'content': report})
             
