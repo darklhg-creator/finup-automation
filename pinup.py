@@ -13,18 +13,19 @@ THEME_WEBHOOK = "https://discord.com/api/webhooks/1461690207291310185/TGsuiHItgO
 
 def send_to_discord(webhook_url, content):
     try:
+        # 단순 텍스트 전송으로 변경 (이미지 제외)
         requests.post(webhook_url, json={'content': content})
     except Exception as e:
         print(f"❌ 전송 오류: {e}")
 
 def main():
-    print("🚀 리포트 생성 시작 (이미지 전송 제외)...")
+    print("🚀 [최종 수정본] 리포트 생성 시작...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--window-size=1600,1200') # 캡처가 없으므로 사이즈 축소
+    chrome_options.add_argument('--window-size=1600,1200')
     chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36')
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
@@ -62,9 +63,9 @@ def main():
             driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
             time.sleep(5)
 
-            # 테마 클릭 (중괄호를 {{ }}로 이스케이프 처리)
-            click_js = f"""
-            var target = '{t_name}';
+            # [핵심 수정] f-string 대신 format 사용으로 중괄호 에러 방지
+            click_js = """
+            var target = '{target_name}';
             var els = document.querySelectorAll('tspan, text, div');
             for(var el of els) {{
                 if(el.textContent.trim() === target) {{
@@ -73,17 +74,12 @@ def main():
                 }
             }}
             return false;
-            """
-
-
-
-
-
+            """.format(target_name=t_name)
             
             driver.execute_script(click_js)
             time.sleep(5)
             
-            # 상세 리스트 텍스트 추출 (이미지 저장/전송 부분 삭제됨)
+            # 상세 리스트 텍스트 추출
             list_js = """
             var list = document.querySelectorAll('.theme_detail_list li, .detail_list li, tr');
             return Array.from(list).map(el => el.innerText.replace(/\\n/g, ' ').trim());
@@ -124,7 +120,7 @@ def main():
         with open("targets.txt", "w", encoding="utf-8") as f:
             f.write("\n".join(list(set(collected_for_start))))
             
-        print("✅ 리포트 전송이 완료되었습니다!")
+        print("✅ 모든 작업이 성공적으로 완료되었습니다!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {e}")
