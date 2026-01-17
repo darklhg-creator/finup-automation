@@ -17,14 +17,14 @@ def send_to_discord(file_path, content):
             requests.post(DISCORD_WEBHOOK_URL, data={'content': content}, files={'file': f})
 
 def main():
-    print("🚀 핀업 스크롤 보정 및 정밀 좌표 클릭 시작...")
+    print("🚀 핀업 최종 좌표 타격 및 5단계 캡처 시작...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    # 화면 높이를 넉넉히 2500으로 설정하여 모든 섹터가 한 번에 보이게 함
-    chrome_options.add_argument('--window-size=1600,2500')
+    # 모든 요소가 보일 수 있게 창 크기를 충분히 크게 설정
+    chrome_options.add_argument('--window-size=1600,3000')
     chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36')
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
@@ -47,51 +47,52 @@ def main():
         unique_top = {item['name']: item for item in extracted}.values()
         top5 = sorted(unique_top, key=lambda x: x['val'], reverse=True)[:5]
 
-        print(f"✅ 타겟팅 리스트: {[t['name'] for t in top5]}")
+        print(f"✅ 타겟 확정: {[t['name'] for t in top5]}")
 
-        # 2. 좌표 클릭 시퀀스 (스크롤 보정 포함)
+        # 2. 물리적 좌표 클릭 시퀀스
         for i, theme in enumerate(top5):
             t_name = theme['name']
-            print(f"🔍 {i+1}위 추적: {t_name}")
+            print(f"🔍 {i+1}위 추적 및 클릭: {t_name}")
             
-            # 요소 찾기 및 스크롤 스크립트
-            find_and_scroll_script = f"""
+            # 자바스크립트로 좌표만 가져오기 (스크롤 포함)
+            find_script = f"""
             var target = "{t_name}";
             var els = document.querySelectorAll('tspan, text, div, span');
             for (var el of els) {{
                 if (el.textContent.includes(target)) {{
                     el.scrollIntoView({{block: "center", inline: "center"}});
                     var r = el.getBoundingClientRect();
-                    return {{x: r.left + r.width/2, y: r.top + r.height/2}};
+                    return {{x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2)}};
                 }}
             }}
             return null;
             """
-            pos = driver.execute_script(find_and_scroll_script)
-            time.sleep(2) # 스크롤 후 안정화 대기
+            pos = driver.execute_script(find_script)
+            time.sleep(3) # 화면 안정화
 
             if pos:
-                print(f"🎯 좌표 확인 (스크롤 완료): ({pos['x']}, {pos['y']})")
+                print(f"🎯 좌표 타격 지점: ({pos['x']}, {pos['y']})")
                 try:
-                    # 이제 화면 중앙에 있으므로 클릭이 가능함
+                    # ActionChains를 사용한 정밀 물리 클릭
+                    # 0,0(좌상단) 기준으로 마우스를 이동시켜 클릭합니다.
                     actions = ActionChains(driver)
-                    # 스크롤된 상태에서의 뷰포트 좌표를 직접 클릭
-                    driver.execute_script(f"document.elementFromPoint({{pos['x']}}, {{pos['y']}}).click();")
+                    actions.move_by_offset(pos['x'], pos['y']).click().perform()
+                    # 다음 클릭을 위해 마우스 위치 초기화
+                    actions.move_by_offset(-pos['x'], -pos['y']).perform()
                     
-                    # 만약 위 코드가 안되면 물리적 클릭 시도
-                    # actions.move_by_offset(pos['x'], pos['y']).click().perform()
+                    time.sleep(10) # 상세 페이지 로딩 대기
                     
-                    time.sleep(10) 
                     shot_name = f"top_{i+1}.png"
                     driver.save_screenshot(shot_name)
-                    send_to_discord(shot_name, f"✅ **{i+1}위: {t_name}** ({theme['rate']})")
+                    send_to_discord(shot_name, f"✅ **{i+1}위 상세: {t_name}** ({theme['rate']})")
                     
-                    driver.back()
+                    driver.back() # 다시 메인으로
                     time.sleep(5)
                 except Exception as click_err:
-                    print(f"⚠️ 클릭 실행 중 오류: {click_err}")
+                    print(f"⚠️ 클릭 실패: {click_err}")
+                    # 클릭 실패시 강제 URL 이동 등의 플랜B를 쓸 수 있지만 일단 물리 클릭에 집중
             else:
-                print(f"⚠️ {t_name} 위치를 찾을 수 없음")
+                print(f"⚠️ {t_name} 위치를 찾을 수 없습니다.")
 
     except Exception as e:
         print(f"❌ 프로세스 오류: {e}")
