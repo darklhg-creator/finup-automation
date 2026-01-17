@@ -62,7 +62,7 @@ def main():
             driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
             time.sleep(5)
 
-            # 테마 클릭 (상세 종목을 보기 위함)
+        # 테마 클릭 (중괄호를 {{ }}로 수정함)
             click_js = f"""
             var target = '{t_name}';
             var els = document.querySelectorAll('tspan, text, div');
@@ -71,7 +71,7 @@ def main():
                     el.dispatchEvent(new MouseEvent('click', {{bubbles:true}}));
                     return true;
                 }
-            }
+            }}
             return false;
             """
             driver.execute_script(click_js)
