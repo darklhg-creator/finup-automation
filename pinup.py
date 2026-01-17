@@ -13,13 +13,13 @@ THEME_WEBHOOK = "https://discord.com/api/webhooks/1461690207291310185/TGsuiHItgO
 
 def send_to_discord(webhook_url, content):
     try:
-        # 단순 텍스트 전송으로 변경 (이미지 제외)
+        # 이미지 없이 텍스트만 전송
         requests.post(webhook_url, json={'content': content})
     except Exception as e:
         print(f"❌ 전송 오류: {e}")
 
 def main():
-    print("🚀 [최종 수정본] 리포트 생성 시작...")
+    print("🚀 [에러 완전 박멸 버전] 리포트 생성 시작...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
@@ -37,7 +37,7 @@ def main():
     try:
         # 1. 메인 페이지 접속 및 TOP 5 테마 추출
         driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-        time.sleep(10) # 페이지 로딩 대기
+        time.sleep(10)
         
         page_text = driver.find_element(By.TAG_NAME, "body").text
         raw_items = re.findall(r'([가-힣A-Za-z/ ]{2,})\n?([+-]?\d+\.\d+%)', page_text)
@@ -63,23 +63,22 @@ def main():
             driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
             time.sleep(5)
 
-            # [핵심 수정] f-string 대신 format 사용으로 중괄호 에러 방지
-            click_js = """
-            var target = '{target_name}';
+            # [수정] 중괄호 에러를 피하기 위해 f-string이나 format을 절대 쓰지 않음
+            click_js = "var target = '" + t_name + "';"
+            click_js += """
             var els = document.querySelectorAll('tspan, text, div');
-            for(var el of els) {{
-                if(el.textContent.trim() === target) {{
-                    el.dispatchEvent(new MouseEvent('click', {{bubbles:true}}));
+            for(var el of els) {
+                if(el.textContent.trim() === target) {
+                    el.dispatchEvent(new MouseEvent('click', {bubbles:true}));
                     return true;
                 }
-            }}
+            }
             return false;
-            """.format(target_name=t_name)
+            """
             
             driver.execute_script(click_js)
             time.sleep(5)
             
-            # 상세 리스트 텍스트 추출
             list_js = """
             var list = document.querySelectorAll('.theme_detail_list li, .detail_list li, tr');
             return Array.from(list).map(el => el.innerText.replace(/\\n/g, ' ').trim());
@@ -92,14 +91,10 @@ def main():
             for line in raw_lines:
                 if '%' in line and not any(tn in line[:10] for tn in theme_names):
                     if len(line) < 5 or line in s_seen: continue
-                    
                     stocks_info.append(line)
-                    
-                    # targets.txt용 종목명만 추출
                     name_match = re.search(r'([가-힣A-Za-z&.]{2,})', line)
                     if name_match:
                         collected_for_start.append(name_match.group(1))
-                    
                     s_seen.add(line)
                     if len(stocks_info) >= 5: break
 
@@ -120,7 +115,7 @@ def main():
         with open("targets.txt", "w", encoding="utf-8") as f:
             f.write("\n".join(list(set(collected_for_start))))
             
-        print("✅ 모든 작업이 성공적으로 완료되었습니다!")
+        print("✅ 모든 작업이 드디어 성공했습니다!")
 
     except Exception as e:
         print(f"❌ 오류 발생: {e}")
