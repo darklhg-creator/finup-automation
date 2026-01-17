@@ -62,7 +62,7 @@ def main():
             driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
             time.sleep(5)
 
-        # 테마 클릭 (중괄호를 {{ }}로 수정함)
+            # 테마 클릭 (중괄호를 {{ }}로 이스케이프 처리)
             click_js = f"""
             var target = '{t_name}';
             var els = document.querySelectorAll('tspan, text, div');
@@ -74,6 +74,12 @@ def main():
             }}
             return false;
             """
+
+
+
+
+
+            
             driver.execute_script(click_js)
             time.sleep(5)
             
