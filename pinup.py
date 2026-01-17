@@ -22,7 +22,7 @@ def send_to_discord(webhook_url, content, file_path=None):
         print(f"❌ 전송 오류: {e}")
 
 def main():
-    print("🚀 [최종 통합] 슬래시(/) 구분자 버전 리포트 생성 시작...")
+    print("🚀 [재시작] 슬래시(/) 구분자 버전 리포트 생성 시작...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
@@ -66,7 +66,7 @@ def main():
             driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
             time.sleep(10)
 
-            # 테마 클릭 (자바스크립트 실행)
+            # 테마 클릭
             click_js = f"""
             var target = '{t_name}';
             var els = document.querySelectorAll('tspan, text, div');
@@ -86,7 +86,7 @@ def main():
             driver.save_screenshot(shot_name)
             send_to_discord(THEME_WEBHOOK, f"📸 **{i+1}위 {t_name} 상세 화면**", shot_name)
 
-            # 상세 리스트 텍스트 추출 (한 줄씩)
+            # 상세 리스트 텍스트 추출
             list_js = """
             var list = document.querySelectorAll('.theme_detail_list li, .detail_list li, tr');
             return Array.from(list).map(el => el.innerText.replace(/\\n/g, ' ').trim());
@@ -97,8 +97,42 @@ def main():
             s_seen = set()
             
             for line in raw_lines:
-                # '%'가 들어있고 테마명과 겹치지 않는 줄만 선택
                 if '%' in line and not any(tn in line[:10] for tn in theme_names):
                     if len(line) < 5 or line in s_seen: continue
                     
-                    stocks_info.
+                    stocks_info.append(line)
+                    
+                    # targets.txt용 종목명만 추출
+                    name_match = re.search(r'([가-힣A-Za-z&.]{2,})', line)
+                    if name_match:
+                        collected_for_start.append(name_match.group(1))
+                    
+                    s_seen.add(line)
+                    if len(stocks_info) >= 5: break
+
+            final_report.append({
+                "rank": f"{i+1}위",
+                "sector": f"{t_name} ({theme['rate']})",
+                "stocks": " / ".join(stocks_info) if stocks_info else "데이터 추출 실패"
+            })
+
+        # 3. 리포트 전송
+        summary_msg = f"## 📅 {today_date} 테마 TOP 5 리포트\n"
+        summary_msg += "| 순위 | 섹터 | 주요 종목 |\n| :--- | :--- | :--- |\n"
+        for item in final_report:
+            summary_msg += f"| {item['rank']} | **{item['sector']}** | {item['stocks']} |\n"
+        
+        send_to_discord(THEME_WEBHOOK, summary_msg)
+        
+        with open("targets.txt", "w", encoding="utf-8") as f:
+            f.write("\n".join(list(set(collected_for_start))))
+            
+        print("✅ 모든 작업이 드디어 완료되었습니다!")
+
+    except Exception as e:
+        print(f"❌ 오류 발생: {e}")
+    finally:
+        driver.quit()
+
+if __name__ == "__main__":
+    main()
