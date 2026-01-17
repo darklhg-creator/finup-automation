@@ -3,7 +3,7 @@ name: Stock Analysis Workflow
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 8 * * 1-5'
+    - cron: '30 9 * * *'  # UTC 09:30 -> 한국 시간(KST) 18:30 (오후 6시 30분)
 
 jobs:
   build:
