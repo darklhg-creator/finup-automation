@@ -17,22 +17,23 @@ def send_to_discord(file_path, content):
             requests.post(DISCORD_WEBHOOK_URL, data={'content': content}, files={'file': f})
 
 def main():
-    print("🚀 핀업 파편화된 텍스트 좌표 정밀 클릭 시작...")
+    print("🚀 핀업 스크롤 보정 및 정밀 좌표 클릭 시작...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--window-size=1600,1200')
+    # 화면 높이를 넉넉히 2500으로 설정하여 모든 섹터가 한 번에 보이게 함
+    chrome_options.add_argument('--window-size=1600,2500')
     chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36')
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     
     try:
         driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-        time.sleep(20) # 차트가 완전히 렌더링될 때까지 넉넉히 대기
+        time.sleep(15) 
 
-        # 1. TOP 5 리스트 확보 (이미 검증된 로직)
+        # 1. TOP 5 리스트 확보
         page_text = driver.find_element(By.TAG_NAME, "body").text
         raw_items = re.findall(r'([가-힣A-Za-z/ ]{2,})\n?([+-]?\d+\.\d+%)', page_text)
         
@@ -40,7 +41,7 @@ def main():
         for name, rate in raw_items:
             val = float(rate.replace('%', ''))
             clean_name = name.strip()
-            if not clean_name.isdigit():
+            if not clean_name.isdigit() and len(clean_name) < 15:
                 extracted.append({'name': clean_name, 'rate': rate, 'val': val})
         
         unique_top = {item['name']: item for item in extracted}.values()
@@ -48,50 +49,52 @@ def main():
 
         print(f"✅ 타겟팅 리스트: {[t['name'] for t in top5]}")
 
-        # 2. 파편화된 텍스트 요소 강제 추적 및 클릭
+        # 2. 좌표 클릭 시퀀스 (스크롤 보정 포함)
         for i, theme in enumerate(top5):
             t_name = theme['name']
-            print(f"🔍 {i+1}위 추적 중: {t_name}")
+            print(f"🔍 {i+1}위 추적: {t_name}")
             
-            # JavaScript로 텍스트 조각 위치 찾기 (정밀 모드)
-            find_script = f"""
+            # 요소 찾기 및 스크롤 스크립트
+            find_and_scroll_script = f"""
             var target = "{t_name}";
-            var shortTarget = target.substring(0, 2); // '정원오' -> '정원'
-            var allElements = document.querySelectorAll('tspan, text, div, span, [class*="point"]');
-            
-            for (var el of allElements) {{
-                var txt = el.textContent.trim();
-                // 전체 일치 혹은 부분 일치 확인
-                if (txt === target || (txt.length >= 2 && target.includes(txt)) || txt.includes(shortTarget)) {{
-                    var rect = el.getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0) {{
-                        return {{x: rect.left + rect.width/2, y: rect.top + rect.height/2}};
-                    }}
+            var els = document.querySelectorAll('tspan, text, div, span');
+            for (var el of els) {{
+                if (el.textContent.includes(target)) {{
+                    el.scrollIntoView({{block: "center", inline: "center"}});
+                    var r = el.getBoundingClientRect();
+                    return {{x: r.left + r.width/2, y: r.top + r.height/2}};
                 }}
             }}
             return null;
             """
-            pos = driver.execute_script(find_script)
-            
+            pos = driver.execute_script(find_and_scroll_script)
+            time.sleep(2) # 스크롤 후 안정화 대기
+
             if pos:
-                print(f"🎯 좌표 발견: ({pos['x']}, {pos['y']}) - 클릭 시도")
-                actions = ActionChains(driver)
-                # 뷰포트 기준 절대 좌표 클릭
-                actions.move_to_element_with_offset(driver.find_element(By.TAG_NAME, "body"), pos['x'], pos['y']).click().perform()
-                
-                time.sleep(12) # 상세 페이지 로딩 대기
-                
-                shot_name = f"top_{i+1}.png"
-                driver.save_screenshot(shot_name)
-                send_to_discord(shot_name, f"✅ **{i+1}위 상세: {t_name}** ({theme['rate']})")
-                
-                driver.back() # 메인 맵으로 복귀
-                time.sleep(5)
+                print(f"🎯 좌표 확인 (스크롤 완료): ({pos['x']}, {pos['y']})")
+                try:
+                    # 이제 화면 중앙에 있으므로 클릭이 가능함
+                    actions = ActionChains(driver)
+                    # 스크롤된 상태에서의 뷰포트 좌표를 직접 클릭
+                    driver.execute_script(f"document.elementFromPoint({{pos['x']}}, {{pos['y']}}).click();")
+                    
+                    # 만약 위 코드가 안되면 물리적 클릭 시도
+                    # actions.move_by_offset(pos['x'], pos['y']).click().perform()
+                    
+                    time.sleep(10) 
+                    shot_name = f"top_{i+1}.png"
+                    driver.save_screenshot(shot_name)
+                    send_to_discord(shot_name, f"✅ **{i+1}위: {t_name}** ({theme['rate']})")
+                    
+                    driver.back()
+                    time.sleep(5)
+                except Exception as click_err:
+                    print(f"⚠️ 클릭 실행 중 오류: {click_err}")
             else:
-                print(f"⚠️ {t_name} 위치 파악 불가. 무시하고 다음 섹터 진행.")
+                print(f"⚠️ {t_name} 위치를 찾을 수 없음")
 
     except Exception as e:
-        print(f"❌ 전체 프로세스 오류: {e}")
+        print(f"❌ 프로세스 오류: {e}")
     finally:
         driver.quit()
 
