@@ -8,30 +8,29 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
-DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
+# 1. 전달해주신 웹훅 주소 설정
+THEME_WEBHOOK = "https://discord.com/api/webhooks/1461690207291310185/TGsuiHItgOU3opyA6Z9NPalUSlSwdZFBWIF2EKPfNNHZbmkmiHywHe4UpXXQGB2b3jEo"
+IGYEOK_WEBHOOK = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
 
-def send_to_discord(content, file_path=None):
-    """디스코드 웹훅 전송 (텍스트 및 이미지 파일 대응)"""
+def send_to_discord(webhook_url, content, file_path=None):
+    """지정된 채널 웹훅으로 텍스트 또는 파일을 전송"""
     try:
         if file_path and os.path.exists(file_path):
             with open(file_path, 'rb') as f:
-                # 파일 전송 시에는 payload를 'content' 키에 담아 전송
-                response = requests.post(DISCORD_WEBHOOK_URL, data={'content': content}, files={'file': f})
+                requests.post(webhook_url, data={'content': content}, files={'file': f})
         else:
-            response = requests.post(DISCORD_WEBHOOK_URL, json={'content': content})
-        return response.status_code
+            requests.post(webhook_url, json={'content': content})
     except Exception as e:
         print(f"❌ 전송 오류: {e}")
-        return None
 
 def main():
-    print("🚀 핀업 이미지+데이터 통합 시스템 가동...")
+    print("🚀 테마록(핀업) 채널 전송 시스템 가동...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--window-size=1600,2000') 
+    chrome_options.add_argument('--window-size=1600,2500') # 충분한 높이 확보
     chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36')
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
@@ -40,36 +39,38 @@ def main():
     today_date = time.strftime("%m월 %d일")
 
     try:
+        # 메인 페이지 접속
         driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
         time.sleep(15)
         
-        # 1. TOP 5 리스트 확보
+        # 1. 전체 테마명 리스트 확보 (필터링용)
         page_text = driver.find_element(By.TAG_NAME, "body").text
         raw_items = re.findall(r'([가-힣A-Za-z/ ]{2,})\n?([+-]?\d+\.\d+%)', page_text)
         
         top5 = []
-        theme_names = []
+        all_theme_names = []
         seen = set()
         for name, rate in raw_items:
             clean_name = name.strip()
             if clean_name not in seen and not clean_name.isdigit():
                 val = float(rate.replace('%', ''))
                 top5.append({'name': clean_name, 'rate': rate, 'val': val})
-                theme_names.append(clean_name)
+                all_theme_names.append(clean_name)
                 seen.add(clean_name)
+        
         top5 = sorted(top5, key=lambda x: x['val'], reverse=True)[:5]
-        print(f"🎯 타겟 확정: {[t['name'] for t in top5]}")
+        print(f"🎯 테마 타겟 확정: {[t['name'] for t in top5]}")
 
-        # 2. 각 테마 정밀 추적 및 분석
+        # 2. 각 테마 상세 분석 (테마록 채널로 전송)
         for i, theme in enumerate(top5):
             t_name = theme['name']
             print(f"📡 {i+1}위 추적: {t_name}")
             
-            # 매 사이클마다 메인 페이지에서 시작 (안정성 확보)
             driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
             time.sleep(12)
 
-            get_real_pos_script = f"""
+            # 정밀 좌표 찾기
+            pos_script = f"""
             var target = "{t_name}";
             var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
             var node;
@@ -78,47 +79,38 @@ def main():
                     var range = document.createRange();
                     range.selectNodeContents(node);
                     var rect = range.getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0) {{
-                        return {{x: rect.left + rect.width/2, y: rect.top + rect.height/2}};
-                    }}
+                    if (rect.width > 0) return {{x: rect.left + rect.width/2, y: rect.top + rect.height/2}};
                 }}
             }}
             return null;
             """
-            pos = driver.execute_script(get_real_pos_script)
+            pos = driver.execute_script(pos_script)
             
             stocks_info = []
             if pos:
-                print(f"🎯 {t_name} 클릭 지점: ({pos['x']}, {pos['y']})")
+                # 관통 클릭 및 로딩 대기
+                driver.execute_script(f"document.elementFromPoint({pos['x']}, {pos['y']}).dispatchEvent(new MouseEvent('click', {{bubbles:true}}));")
+                time.sleep(10)
                 
-                # 정밀 클릭 발사
-                click_script = f"""
-                var x = {pos['x']}; var y = {pos['y']};
-                var el = document.elementFromPoint(x, y);
-                if (el) {{
-                    ['mousedown', 'click', 'mouseup'].forEach(evt => {{
-                        el.dispatchEvent(new MouseEvent(evt, {{bubbles: true, clientX: x, clientY: y}}));
-                    }});
-                }}
-                """
-                driver.execute_script(click_script)
-                time.sleep(10) # 상세 페이지 로딩 대기
-
-                # [이미지 저장 및 전송]
+                # 하단 종목 리스트 로딩을 위한 스크롤
+                driver.execute_script("window.scrollTo(0, 1000);")
+                time.sleep(5)
+                
+                # [이미지 전송] 테마록 채널로!
                 shot_name = f"top_{i+1}.png"
                 driver.save_screenshot(shot_name)
-                send_to_discord(f"📸 **{i+1}위 {t_name} 상세 화면**", shot_name)
+                send_to_discord(THEME_WEBHOOK, f"📸 **{i+1}위 {t_name} 상세**", shot_name)
                 
-                # [데이터 추출]
-                detail_text = driver.find_element(By.TAG_NAME, "body").text
-                # 종목명(한글/숫자/영문) + 등락률 패턴
-                stock_matches = re.findall(r'([가-힣A-Za-z0-9&]{2,12})\s+([+-]?\d+\.\d+%)', detail_text)
+                # [종목 데이터 파싱 보강]
+                detail_body = driver.find_element(By.TAG_NAME, "body").text
+                # 종목명과 등락률 패턴 매칭 (이름 2~12자 + 공백 + 퍼센트)
+                matches = re.findall(r'([가-힣A-Za-z0-9&]{2,12})\s+([+-]?\d+\.\d+%)', detail_body)
                 
                 s_seen = set()
-                for s_name, s_rate in stock_matches:
+                for s_name, s_rate in matches:
                     s_name = s_name.strip()
-                    # 테마명 제외 및 중복 방지
-                    if s_name not in theme_names and s_name not in s_seen:
+                    # 테마 리스트에 있는 이름이 아니고, 중복이 아닐 때만 종목으로 인정
+                    if s_name not in all_theme_names and s_name not in s_seen:
                         stocks_info.append(f"{s_name} {s_rate}")
                         s_seen.add(s_name)
                     if len(stocks_info) >= 5: break
@@ -126,20 +118,20 @@ def main():
             final_report.append({
                 "rank": f"{i+1}위",
                 "sector": f"{t_name} ({theme['rate']})",
-                "stocks": "<br>".join(stocks_info) if stocks_info else "종목 데이터 추출 실패"
+                "stocks": "<br>".join(stocks_info) if stocks_info else "종목 로딩 지연"
             })
 
-        # 3. 최종 요약 표 리포트 생성 및 전송
-        summary_msg = f"## 📅 {today_date} 테마 TOP 5 요약 리포트\n"
+        # 3. 최종 요약 리포트 전송 (테마록 채널로!)
+        summary_msg = f"## 📅 {today_date} 테마 TOP 5 리포트\n"
         summary_msg += "| 순위 | 섹터 | 주요 종목 |\n| :--- | :--- | :--- |\n"
         for item in final_report:
             summary_msg += f"| {item['rank']} | **{item['sector']}** | {item['stocks']} |\n"
         
-        send_to_discord(summary_msg)
-        print("✅ 모든 리포트 및 이미지 전송 완료!")
+        send_to_discord(THEME_WEBHOOK, summary_msg)
+        print("✅ 테마록 채널로 모든 전송 완료!")
 
     except Exception as e:
-        print(f"❌ 오류: {e}")
+        print(f"❌ 오류 발생: {e}")
     finally:
         driver.quit()
 
