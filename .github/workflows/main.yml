@@ -24,17 +24,17 @@ jobs:
           pip install pandas requests beautifulsoup4 lxml selenium webdriver-manager
           pip install -U finance-datareader
 
-      - name: Step 1 - Disparity Analysis
+      - name: Step 1 - Analysis
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python start.py
 
-      - name: Step 2 - Finance Filter
+      - name: Step 2 - Filter
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python finance_filter.py
 
-      - name: Step 3 - Pinup Analysis
+      - name: Step 3 - Pinup
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python pinup.py
