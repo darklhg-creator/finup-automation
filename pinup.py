@@ -40,7 +40,7 @@ def main():
     try:
         # 1. 메인 페이지 접속 및 TOP 5 테마 추출
         driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-        time.sleep(15)
+        time.sleep(30)
         
         page_text = driver.find_element(By.TAG_NAME, "body").text
         raw_items = re.findall(r'([가-힣A-Za-z/ ]{2,})\n?([+-]?\d+\.\d+%)', page_text)
@@ -64,7 +64,7 @@ def main():
             print(f"📡 {i+1}위 분석 중: {t_name}")
             
             driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-            time.sleep(10)
+            time.sleep(30)
 
             # 테마 클릭
             click_js = f"""
@@ -79,7 +79,7 @@ def main():
             return false;
             """
             driver.execute_script(click_js)
-            time.sleep(10)
+            time.sleep(30)
             
             # 캡처 전송
             shot_name = f"top_{i+1}.png"
