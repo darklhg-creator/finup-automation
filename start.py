@@ -2,6 +2,7 @@ import FinanceDataReader as fdr
 import requests
 import pandas as pd
 from datetime import datetime
+import time
 
 IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
 
@@ -9,16 +10,16 @@ def main():
     print("🚀 [1단계] 정밀 분석 시작 (KOSPI 50 + KOSDAQ 50)")
     
     try:
-        # [추가] 휴장일 체크: 삼성전자 데이터를 통해 오늘 장이 열렸는지 확인
+        # 휴장일 체크
         #check_df = fdr.DataReader('005930').tail(1)
         #last_date = check_df.index[-1].strftime('%Y-%m-%d')
         #today_date = datetime.now().strftime('%Y-%m-%d')
 
-        #if last_date != today_date:
-            #msg = f"📅 오늘은 주식 시장 휴무일입니다. ({today_date})"
-            #print(msg)
+       # if last_date != today_date:
+           # msg = f"📅 오늘은 주식 시장 휴무일입니다. ({today_date})"
+           # print(msg)
             #requests.post(IGYEOK_WEBHOOK_URL, json={'content': msg})
-            #return # 프로그램 종료
+           # return
 
         # 1. 대상 종목 선정
         df_kospi = fdr.StockListing('KOSPI').head(50)
@@ -33,7 +34,6 @@ def main():
             name = row['Name']
             
             try:
-                # 정확한 MA20을 위해 30일치 데이터 요청
                 df = fdr.DataReader(code).tail(30)
                 if len(df) < 20: continue
                 
@@ -46,20 +46,23 @@ def main():
             except:
                 continue
 
-        # 2. 결과 정렬 및 전송
+        # 2. 결과 정렬 및 저장/전송 (이 부분의 들여쓰기가 중요합니다!)
         if results:
             results = sorted(results, key=lambda x: x['disparity'])
+            
+            # 디스코드 리포트 생성
             report = f"### 📊 1단계 정밀 분석 결과\n"
             for r in results[:20]:
                 report += f"· **{r['name']}({r['code']})**: {r['disparity']}\n"
             
             requests.post(IGYEOK_WEBHOOK_URL, json={'content': report})
             
-    with open("targets.txt", "w", encoding="utf-8") as f:
-        # '290650,엘앤씨바이오' 이런 형식으로 한 줄씩 저장합니다.
-        lines = [f"{r['code']},{r['name']}" for r in results]
-        f.write("\n".join(lines))
-            print(f"✅ 분석 완료!")
+            # 2단계를 위해 '코드,종목명' 형식으로 targets.txt에 저장 📍
+            with open("targets.txt", "w", encoding="utf-8") as f:
+                lines = [f"{r['code']},{r['name']}" for r in results]
+                f.write("\n".join(lines))
+                
+            print(f"✅ 분석 완료! targets.txt 생성됨")
         else:
             print("🔍 조건에 맞는 종목이 없습니다.")
 
