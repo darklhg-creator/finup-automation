@@ -1,85 +1,82 @@
-import FinanceDataReader as fdr
 import requests
-import os
+import FinanceDataReader as fdr
 import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
+import time
+import os
 from datetime import datetime
 
-# 이격도 채널 웹훅 (1단계 분석 결과 전송용)
-IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
+DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
-def get_stock_description(symbol, df_krx):
-    """KRX 리스트에서 종목의 섹터와 주요 사업 내용을 가져옵니다."""
+def get_oversold_stocks():
+    print("🔍 통합 시총 상위 500위 분석 시작 (코스피/코스닥 포함)...")
     try:
-        row = df_krx[df_krx['Code'] == symbol]
-        if not row.empty:
-            sector = row['Sector'].values[0] if 'Sector' in row else "미분류"
-            industry = row['Industry'].values[0] if 'Industry' in row else "내용 없음"
-            return f"[{sector}] {industry}"
-    except:
-        return "정보를 가져올 수 없습니다."
-    return "정보 없음"
+        # 시장 구분 없이 통합 시총 상위 500개 추출
+        df_krx = fdr.StockListing('KRX')
+        df_top500 = df_krx.sort_values(by='Marcap', ascending=False).head(500)
+        target_codes = df_top500['Code'].tolist()
+        target_names = df_top500['Name'].tolist()
+        
+        all_stocks_data = []
+        
+        for i, code in enumerate(target_codes):
+            try:
+                # 최근 25일치 데이터만 가져와서 속도 최적화 ⚡
+                df = fdr.DataReader(code).tail(25)
+                if len(df) < 20: continue
+                
+                # 이격도 계산
+                current_price = df['Close'].iloc[-1]
+                ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
+                disparity = (current_price / ma20) * 100
+                
+                all_stocks_data.append({'name': target_names[i], 'code': code, 'disparity': disparity})
+                
+                # 100개마다 진행 상황 출력
+                if (i + 1) % 100 == 0: print(f"✅ {i+1}/500 종목 분석 완료")
+            except:
+                continue
+        
+        # 필터링 및 결과 정리
+        all_stocks_data.sort(key=lambda x: x['disparity'])
+        under_95 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data if s['disparity'] <= 95]
+        
+        if under_95:
+            return "🔍 [이격도 95 이하 포착]", under_95
+        
+        lowest_5 = [f"· {s['name']}({s['code']}): {s['disparity']:.1f}" for s in all_stocks_data[:5]]
+        return "❓ [이격도 최하위 5종목]", lowest_5
+
+    except Exception as e:
+        print(f"❌ 데이터 에러: {e}")
+        return "⚠️ 분석 중 오류 발생", []
 
 def main():
-    print("🚀 [1단계] 이격도 분석 및 종목 정보 수집 시작...")
+    title_text, stocks = get_oversold_stocks()
+    stock_msg = "\n".join(stocks[:25])
     
-    # 분석 대상 (예: 코스피/코스닥 전체 혹은 특정 리스트)
-    # 여기서는 예시로 KRX 전체 종목 중 거래량이 활발한 상위 종목을 가정하거나 
-    # 기존에 정의된 targets.txt가 있다면 그것을 읽어옵니다.
-    
-    df_krx = fdr.StockListing('KRX')
-    
-    # 테스트를 위해 분석할 종목 리스트 (실제로는 전략에 맞는 종목 리스트를 넣으세요)
-    # 예: target_codes = ['005930', '000660', ...] 
-    # 만약 targets.txt가 입구라면 아래를 사용합니다.
-    if os.path.exists("targets.txt"):
-        with open("targets.txt", "r", encoding="utf-8") as f:
-            target_names = [line.strip() for line in f.readlines() if line.strip()]
-    else:
-        print("💡 분석 대상(targets.txt)이 없어 시가총액 상위 일부로 테스트합니다.")
-        target_names = df_krx.head(10)['Name'].tolist()
+    print("📸 핀업 테마 로그 캡처 시작...")
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
-    results = []
-    for name in target_names:
-        try:
-            # 종목 코드로 변환
-            matched = df_krx[df_krx['Name'] == name]
-            if matched.empty: continue
-            code = matched['Code'].values[0]
-            
-            # 주가 데이터 수집 및 이격도 계산
-            df = fdr.DataReader(code).tail(30)
-            if len(df) < 20: continue
-            
-            ma20 = df['Close'].rolling(window=20).mean()
-            current_price = df['Close'].iloc[-1]
-            last_ma20 = ma20.iloc[-1]
-            disparity = (current_price / last_ma20) * 100
-            
-            # 종목 설명 추가
-            desc = get_stock_description(code, df_krx)
-            
-            results.append({
-                'name': name,
-                'price': current_price,
-                'disparity': round(disparity, 2),
-                'desc': desc
-            })
-            print(f"✅ {name} 분석 완료")
-        except Exception as e:
-            print(f"❌ {name} 분석 중 오류: {e}")
-
-    # 리포트 생성 및 전송
-    if results:
-        report = "## 📊 1단계 이격도 분석 리포트\n"
-        report += "| 종목명 | 현재가 | 이격도(20일) | 종목 개요 |\n| :--- | :--- | :--- | :--- |\n"
-        for r in results:
-            status = "🔍" if 95 <= r['disparity'] <= 105 else "⚠️"
-            report += f"| {r['name']} | {format(int(r['price']), ',')}원 | {status} {r['disparity']}% | {r['desc']} |\n"
+    try:
+        driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
+        time.sleep(12) # 페이지 로딩 대기
+        save_path = "capture.png"
+        driver.save_screenshot(save_path)
         
-        requests.post(IGYEOK_WEBHOOK_URL, json={'content': report})
-        print("✅ 1단계 분석 리포트 전송 완료!")
-    else:
-        print("❌ 분석된 종목이 없습니다.")
+        with open(save_path, 'rb') as f:
+            content = f"📈 **주식 장 종료 보고서**\n\n**{title_text}**\n{stock_msg}\n\n**3️⃣ 핀업 테마 로그**"
+            requests.post(DISCORD_WEBHOOK_URL, data={'content': content}, files={'file': f})
+            print("🏁 모든 작업 성공 및 디스코드 전송 완료!")
+    finally:
+        driver.quit()
 
 if __name__ == "__main__":
     main()
