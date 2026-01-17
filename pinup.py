@@ -22,7 +22,7 @@ def send_to_discord(webhook_url, content, file_path=None):
         print(f"❌ 전송 오류: {e}")
 
 def main():
-    print("🚀 [최종 보정] 테마 상세 버튼 기준 종목 추출 시작...")
+    print("🚀 [위치 고정 방식] 테마 상세 버튼 하단 5종목 정밀 추출 시작...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
@@ -38,46 +38,39 @@ def main():
     today_date = time.strftime("%m월 %d일")
 
     try:
-        # 1. 메인 페이지 접속 및 테마 TOP 5 추출
         driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
         time.sleep(15)
         
+        # 1. 메인 맵에서 TOP 5 추출 (이 부분은 정상 작동 확인됨)
         page_text = driver.find_element(By.TAG_NAME, "body").text
         raw_items = re.findall(r'([가-힣A-Za-z/ ]{2,})\n?([+-]?\d+\.\d+%)', page_text)
         
         top5 = []
-        all_theme_names = []
         seen = set()
         for name, rate in raw_items:
             clean_name = name.strip()
             if clean_name not in seen and not clean_name.isdigit():
                 val = float(rate.replace('%', ''))
                 top5.append({'name': clean_name, 'rate': rate, 'val': val})
-                all_theme_names.append(clean_name)
                 seen.add(clean_name)
         
         top5 = sorted(top5, key=lambda x: x['val'], reverse=True)[:5]
-        print(f"🎯 테마 타겟 확정: {[t['name'] for t in top5]}")
+        print(f"🎯 분석 타겟: {[t['name'] for t in top5]}")
 
-        # 2. 각 테마 상세 분석
+        # 2. 테마별 상세 페이지 순회
         for i, theme in enumerate(top5):
             t_name = theme['name']
-            print(f"📡 {i+1}위 추적 중: {t_name}")
-            
             driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
-            time.sleep(12)
+            time.sleep(10)
 
-            # [클릭] 정밀 좌표 찾기
+            # 테마 클릭 (좌표 기반)
             pos_script = f"""
             var target = "{t_name}";
-            var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-            var node;
-            while(node = walker.nextNode()) {{
-                if (node.textContent.trim() === target) {{
-                    var range = document.createRange();
-                    range.selectNodeContents(node);
-                    var rect = range.getBoundingClientRect();
-                    if (rect.width > 0) return {{x: rect.left + rect.width/2, y: rect.top + rect.height/2}};
+            var els = document.querySelectorAll('tspan, text, div');
+            for(var el of els) {{
+                if(el.textContent.trim() === target) {{
+                    var r = el.getBoundingClientRect();
+                    return {{x: r.left + r.width/2, y: r.top + r.height/2}};
                 }}
             }}
             return null;
@@ -88,48 +81,48 @@ def main():
             if pos:
                 driver.execute_script(f"document.elementFromPoint({pos['x']}, {pos['y']}).dispatchEvent(new MouseEvent('click', {{bubbles:true}}));")
                 time.sleep(10)
-                driver.execute_script("window.scrollTo(0, 1000);")
-                time.sleep(5)
                 
-                # [이미지 전송]
+                # [캡처본 전송]
                 shot_name = f"top_{i+1}.png"
                 driver.save_screenshot(shot_name)
                 send_to_discord(THEME_WEBHOOK, f"📸 **{i+1}위 {t_name} 상세**", shot_name)
-                
-                # [종목 추출 보강] '테마 상세' 버튼 기준 주변 탐색
+
+                # [종목 정밀 추출] 파란색 영역(테마 상세 하단)을 직접 타겟팅
+                print(f"🔎 {t_name} 종목 데이터 수집 중...")
                 extract_script = """
-                var result = "";
-                var btn = Array.from(document.querySelectorAll('button, a, span')).find(el => el.textContent.includes('테마 상세'));
+                var result = [];
+                // '테마 상세' 텍스트를 가진 요소를 찾음
+                var btn = Array.from(document.querySelectorAll('*')).find(el => el.textContent.trim() === '테마 상세 >');
                 if(btn) {
-                    var container = btn.closest('div').parentElement;
-                    result = container.innerText;
-                } else {
-                    result = document.body.innerText; // 버튼 못 찾을 시 대안
+                    // 버튼의 조상 중 종목 리스트를 감싸는 가장 가까운 컨테이너를 찾음
+                    var container = btn.closest('div').parentElement.parentElement;
+                    // 컨테이너 내부의 모든 텍스트 행을 긁어옴
+                    return container.innerText;
                 }
-                return result;
+                return "";
                 """
-                detail_text = driver.execute_script(extract_script)
+                raw_data = driver.execute_script(extract_script)
                 
-                # 정규식으로 종목명 + 등락률 추출
-                matches = re.findall(r'([가-힣A-Za-z0-9&]{2,12})\s+([+-]?\d+\.\d+%)', detail_text)
-                
-                s_seen = set()
-                for s_name, s_rate in matches:
-                    s_name = s_name.strip()
-                    # 테마 리스트에 있는 이름이 아니고, 중복이 아닐 때만 종목으로 인정
-                    if s_name not in all_theme_names and s_name not in s_seen:
-                        stocks_info.append(f"{s_name} {s_rate}")
-                        collected_for_start.append(f"{s_name}") # start.py 전달용
-                        s_seen.add(s_name)
-                    if len(stocks_info) >= 5: break
+                if raw_data:
+                    # 종목명(한글/영문) + 등락률 패턴만 정밀 필터링
+                    # 한글/영문 2자 이상 + 공백 + +XX.XX%
+                    matches = re.findall(r'([가-힣A-Za-z]{2,10})\s+([+-]?\d+\.\d+%)', raw_data)
+                    
+                    s_seen = set()
+                    for s_name, s_rate in matches:
+                        if s_name != t_name and s_name not in s_seen:
+                            stocks_info.append(f"{s_name} {s_rate}")
+                            collected_for_start.append(f"{s_name}")
+                            s_seen.add(s_name)
+                        if len(stocks_info) >= 5: break
 
             final_report.append({
                 "rank": f"{i+1}위",
                 "sector": f"{t_name} ({theme['rate']})",
-                "stocks": "<br>".join(stocks_info) if stocks_info else "종목 데이터 로딩 실패"
+                "stocks": "<br>".join(stocks_info) if stocks_info else "종목 추출 실패"
             })
 
-        # 3. 최종 요약 리포트 전송
+        # 3. 요약 리포트 전송
         summary_msg = f"## 📅 {today_date} 테마 TOP 5 리포트\n"
         summary_msg += "| 순위 | 섹터 | 주요 종목 |\n| :--- | :--- | :--- |\n"
         for item in final_report:
@@ -141,12 +134,4 @@ def main():
         with open("targets.txt", "w", encoding="utf-8") as f:
             f.write("\n".join(list(set(collected_for_start))))
             
-        print("✅ 모든 작업 완료!")
-
-    except Exception as e:
-        print(f"❌ 오류 발생: {e}")
-    finally:
-        driver.quit()
-
-if __name__ == "__main__":
-    main()
+        print("✅ 테마록 채널
