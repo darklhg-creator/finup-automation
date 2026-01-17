@@ -17,7 +17,7 @@ def send_to_discord(file_path, content):
             requests.post(DISCORD_WEBHOOK_URL, data={'content': content}, files={'file': f})
 
 def main():
-    print("🚀 핀업 화면 기반 텍스트 좌표 클릭 시작...")
+    print("🚀 핀업 그래픽 요소 정밀 좌표 클릭 시작...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
@@ -48,20 +48,24 @@ def main():
 
         print(f"✅ 타겟팅 완료: {[t['name'] for t in top5]}")
 
-        # 2. 좌표 기반 클릭 시퀀스
+        # 2. 그래픽 요소(SVG/Rectangle) 포함 정밀 좌표 검색
         for i, theme in enumerate(top5):
             t_name = theme['name']
             print(f"🖱️ {i+1}위 클릭 시도: {t_name}")
             
             try:
-                # 자바스크립트로 해당 텍스트의 정확한 위치(좌표)를 찾아냅니다.
+                # [강화된 좌표 검색 스크립트]
+                # 텍스트 요소뿐만 아니라, 그 부모나 주변의 그래픽 박스까지 탐색
                 find_and_click_script = f"""
                 var targetText = "{t_name}";
-                var elements = document.querySelectorAll('tspan, div, span');
-                for (var el of elements) {{
-                    if (el.textContent.trim() === targetText || el.textContent.includes(targetText)) {{
+                var allNodes = document.querySelectorAll('tspan, text, div, span, [class*="point"]');
+                for (var el of allNodes) {{
+                    if (el.textContent.trim().includes(targetText)) {{
+                        // 해당 텍스트를 포함하는 가장 작은 사각형 영역 반환
                         var rect = el.getBoundingClientRect();
-                        return {{x: rect.left + rect.width/2, y: rect.top + rect.height/2}};
+                        if (rect.width > 0 && rect.height > 0) {{
+                            return {{x: rect.left + rect.width/2, y: rect.top + rect.height/2}};
+                        }}
                     }}
                 }}
                 return null;
@@ -71,9 +75,8 @@ def main():
                 if pos:
                     # 마우스 제어를 통해 해당 좌표 클릭
                     actions = ActionChains(driver)
-                    actions.move_by_offset(pos['x'], pos['y']).click().perform()
-                    # 이동한 마우스 좌표 초기화
-                    actions.move_by_offset(-pos['x'], -pos['y']).perform()
+                    # move_by_offset은 상대 좌표이므로 초기화가 중요
+                    actions.move_to_element(driver.find_element(By.TAG_NAME, "body")).move_by_offset(pos['x'] - 800, pos['y'] - 600).click().perform()
                     
                     time.sleep(10) # 상세 화면 로딩
                     
@@ -84,7 +87,10 @@ def main():
                     driver.back() # 리스트로 복귀
                     time.sleep(5)
                 else:
-                    print(f"⚠️ {t_name}의 위치를 화면에서 찾을 수 없습니다.")
+                    # 좌표를 못 찾으면 JavaScript 강제 클릭으로 최후의 수단 사용
+                    print(f"⚠️ {t_name} 좌표 검색 실패, 강제 트리거 시도...")
+                    driver.execute_script(f"Array.from(document.querySelectorAll('*')).find(el => el.textContent.trim().includes('{t_name}')).click();")
+                    time.sleep(5)
 
             except Exception as e:
                 print(f"⚠️ {t_name} 처리 실패: {e}")
