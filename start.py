@@ -10,15 +10,15 @@ def main():
     
     try:
         # [추가] 휴장일 체크: 삼성전자 데이터를 통해 오늘 장이 열렸는지 확인
-        check_df = fdr.DataReader('005930').tail(1)
-        last_date = check_df.index[-1].strftime('%Y-%m-%d')
-        today_date = datetime.now().strftime('%Y-%m-%d')
+        #check_df = fdr.DataReader('005930').tail(1)
+        #last_date = check_df.index[-1].strftime('%Y-%m-%d')
+        #today_date = datetime.now().strftime('%Y-%m-%d')
 
-        if last_date != today_date:
-            msg = f"📅 오늘은 주식 시장 휴무일입니다. ({today_date})"
-            print(msg)
-            requests.post(IGYEOK_WEBHOOK_URL, json={'content': msg})
-            return # 프로그램 종료
+        #if last_date != today_date:
+            #msg = f"📅 오늘은 주식 시장 휴무일입니다. ({today_date})"
+            #print(msg)
+            #requests.post(IGYEOK_WEBHOOK_URL, json={'content': msg})
+            #return # 프로그램 종료
 
         # 1. 대상 종목 선정
         df_kospi = fdr.StockListing('KOSPI').head(500)
