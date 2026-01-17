@@ -22,7 +22,7 @@ def send_to_discord(webhook_url, content, file_path=None):
         print(f"❌ 전송 오류: {e}")
 
 def main():
-    print("🚀 [최종 수정] 데이터 통째 추출 버전 시작...")
+    print("🚀 [최종 통합] 슬래시(/) 구분자 버전 리포트 생성 시작...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
@@ -66,7 +66,7 @@ def main():
             driver.get("https://finance.finup.co.kr/Lab/ThemeLog")
             time.sleep(10)
 
-            # 테마 클릭
+            # 테마 클릭 (자바스크립트 실행)
             click_js = f"""
             var target = '{t_name}';
             var els = document.querySelectorAll('tspan, text, div');
@@ -101,37 +101,4 @@ def main():
                 if '%' in line and not any(tn in line[:10] for tn in theme_names):
                     if len(line) < 5 or line in s_seen: continue
                     
-                    stocks_info.append(line)
-                    
-                    # targets.txt용 종목명만 추출 (한글/영문 부분만)
-                    name_match = re.search(r'([가-힣A-Za-z&.]{2,})', line)
-                    if name_match:
-                        collected_for_start.append(name_match.group(1))
-                    
-                    s_seen.add(line)
-                    if len(stocks_info) >= 5: break
-
-          # ... (앞부분 동일) ...
-
-            final_report.append({
-                "rank": f"{i+1}위",
-                "sector": f"{t_name} ({theme['rate']})",
-                # 여기서 <br>을 / 로 변경했습니다.
-                "stocks": " / ".join(stocks_info) if stocks_info else "데이터 추출 실패"
-            })
-
-        # 3. 리포트 전송
-        summary_msg = f"## 📅 {today_date} 테마 TOP 5 리포트\n"
-        # 표의 너비가 넓어질 수 있으므로, 마크다운 표 형식을 유지합니다.
-        summary_msg += "| 순위 | 섹터 | 주요 종목 |\n| :--- | :--- | :--- |\n"
-        for item in final_report:
-            summary_msg += f"| {item['rank']} | **{item['sector']}** | {item['stocks']} |\n"
-        
-        send_to_discord(THEME_WEBHOOK, summary_msg)
-        
-        with open("targets.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(list(set(collected_for_start))))
-            
-        print("✅ 모든 작업 완료! 이제 종목들이 '/'로 구분되어 전송됩니다.")
-
-# ... (뒷부분 동일) ...
+                    stocks_info.
