@@ -18,7 +18,7 @@ def main():
             msg = f"📅 오늘은 주식 시장 휴무일입니다. ({today_date})"
             print(msg)
             requests.post(IGYEOK_WEBHOOK_URL, json={'content': msg})
-            #return # 프로그램 종료
+            return # 프로그램 종료
 
         # 1. 대상 종목 선정
         df_kospi = fdr.StockListing('KOSPI').head(500)
