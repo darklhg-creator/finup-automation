@@ -1,79 +1,73 @@
-import FinanceDataReader as fdr
-import requests
+import yfinance as yf
 import pandas as pd
 import os
-from datetime import datetime, timedelta
 
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
-
-def get_stock_data(code):
-    """최근 10일치 데이터를 가져와서 수급과 거래량 분석"""
+def check_moving_average_order(ticker):
     try:
-        # fdr.DataReader는 기본적으로 종가, 거래량 등을 제공하지만 
-        # 상세 수급(외인/기관)은 별도 확인이 필요할 수 있습니다. 
-        # 여기서는 거래량 변곡점 분석을 위한 기본 데이터를 먼저 가져옵니다.
-        df = fdr.DataReader(code).tail(10)
-        if len(df) < 6: return None
-        return df
-    except:
-        return None
-
-def analyze_supply(code):
-    """2단계: 5일 수급 분석 (외인/기관 순매수)"""
-    # 실제 환경에서는 별도의 수급 API나 크롤링이 필요하지만, 
-    # 여기서는 로직 구현을 위해 '상승 마감 횟수'를 수급의 대용치로 예시하거나 
-    # 사용 중인 라이브러리의 수급 기능을 활용한다고 가정합니다.
-    # 우선은 '거래량 분석'과 구조를 맞춰서 작성해 드릴게요.
-    return True # 조건 만족 가정 (실제 데이터 연동 시 교체)
+        # 이평선을 계산하기 위해 충분한 데이터(6개월치)를 가져옵니다.
+        df = yf.download(ticker, period="1y", interval="1d", progress=False)
+        if len(df) < 120:
+            return False
+            
+        # 이평선 계산
+        df['MA20'] = df['Close'].rolling(window=20).mean()
+        df['MA60'] = df['Close'].rolling(window=60).mean()
+        df['MA120'] = df['Close'].rolling(window=120).mean()
+        
+        last_row = df.iloc[-1]
+        
+        # 1. 중장기 정배열 조건 (60일선이 120일선 위에 있음)
+        # 이 조건이 맞아야 '하락 추세'인 브이티 같은 종목이 걸러집니다.
+        long_term_trend = last_row['MA60'] > last_row['MA120']
+        
+        # 2. 단기 눌림목 조건 (20일선이 60일선 위에 있음)
+        # 주가가 일시적으로 20일선 밑으로 내려왔더라도 추세는 살아있어야 함
+        mid_term_trend = last_row['MA20'] > last_row['MA60']
+        
+        # 3. 이격도 계산 (20일선 기준 92% 이하인지 확인 - start.py와 연동)
+        disparity = (last_row['Close'] / last_row['MA20']) * 100
+        
+        # 최종 필터: 중장기 정배열 + 이격도 과매도 구간
+        if long_term_trend and mid_term_trend and disparity <= 92.5:
+            return True, round(disparity, 1)
+        return False, None
+        
+    except Exception as e:
+        print(f"⚠️ {ticker} 분석 중 오류: {e}")
+        return False, None
 
 def main():
-    target_file = "targets.txt"
-    if not os.path.exists(target_file):
-        print("❌ targets.txt 파일이 없습니다.")
+    print("🔍 [정배열 필터링] 알짜 눌림목 종목 선별 중...")
+    
+    # targets.txt에 있는 종목들을 읽어옵니다.
+    if not os.path.exists("targets_raw.txt"):
+        print("파일이 없습니다.")
         return
+
+    with open("targets_raw.txt", "r", encoding="utf-8") as f:
+        tickers = [line.strip() for line in f.readlines()]
+
+    refined_list = []
     
-    with open(target_file, "r", encoding="utf-8") as f:
-        lines = f.read().splitlines()
+    for item in tickers:
+        # 종목코드와 이름 분리 (예: "태성(323280)")
+        try:
+            name = item.split('(')[0]
+            code = item.split('(')[1].replace(')', '')
+            symbol = f"{code}.KQ" if int(code) > 0 else f"{code}.KS" # 코스닥/코스피 구분 로직 필요시 추가
+            
+            is_good, disp_val = check_moving_average_order(f"{code}.KQ") # 기본 코스닥 가정
+            if is_good:
+                refined_list.append(f"{name}({code}): {disp_val}")
+                print(f"✅ 통과: {name} (이격도: {disp_val})")
+        except:
+            continue
 
-    supply_list = []   # 2단계: 수급 필터링 결과
-    volume_list = []   # 3단계: 거래량 필터링 결과
-
-    print(f"📡 {len(lines)}개 종목 상세 분석 시작...")
-
-    for line in lines:
-        if "," not in line: continue
-        code, name = line.split(",")
-        
-        df = get_stock_data(code)
-        if df is None: continue
-
-        # --- 2단계: 수급 분석 로직 (5일 기준) ---
-        # (실제 외인/기관 데이터 호출 코드가 추가되어야 함)
-        if analyze_supply(code): 
-            supply_list.append(f"· {name}({code})")
-
-        # --- 3단계: 거래량 분석 로직 ---
-        today_vol = df['Volume'].iloc[-1]
-        avg_vol = df['Volume'].iloc[-6:-1].mean() # 직전 5일 평균
-        
-        if today_vol >= avg_vol * 2: # 거래량 200% 급증
-            ratio = round((today_vol / avg_vol) * 100)
-            volume_list.append(f"· {name}({code}): 평소 대비 {ratio}% ⚡")
-
-    # --- 리포트 생성 및 전송 ---
-    final_report = "### 📋 이격도 기반 추가 분석 리포트\n\n"
+    # 최종 필터링된 결과 저장
+    with open("targets.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(refined_list))
     
-    # 2단계 결과
-    final_report += "🐳 **[2단계] 수급 유입 종목 (외인/기관)**\n"
-    final_report += "\n".join(supply_list[:15]) if supply_list else "조건 만족 종목 없음"
-    final_report += "\n\n"
-
-    # 3단계 결과
-    final_report += "⚡ **[3단계] 거래량 변곡점 종목 (200%↑)**\n"
-    final_report += "\n".join(volume_list[:15]) if volume_list else "조건 만족 종목 없음"
-    
-    requests.post(DISCORD_WEBHOOK_URL, json={'content': final_report})
-    print("✅ 분석 리포트 전송 완료!")
+    print(f"✨ 필터링 완료! {len(refined_list)}개 종목이 살아남았습니다.")
 
 if __name__ == "__main__":
     main()
