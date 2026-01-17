@@ -1,13 +1,14 @@
-name: Stock Analysis Pipeline
+name: Pinup Test Analysis
 
 on:
+  workflow_dispatch:      # 수동 실행 버튼용
   schedule:
-    - cron: '0 8 * * 1-5' # 한국시간 오후 5시 (평일)
-  workflow_dispatch: # 수동 실행 버튼
+    - cron: '0 8 * * 1-5'  # 매일 오후 5시 (KST)
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -17,26 +18,11 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install Dependencies & Chrome
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install numpy==1.23.5 pandas==1.5.3
-          pip install finance-datareader requests lxml beautifulsoup4 selenium webdriver-manager
-          # 서버용 크롬 브라우저 설치
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
+          pip install pandas FinanceDataReader requests beautifulsoup4 lxml selenium webdriver-manager
 
-      - name: Step 1 - Run Disparity Analysis
+      - name: Run Pinup Analysis
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python start.py
-
-      - name: Step 2 - Run Finance Filter
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python finance_filter.py
-
-      - name: Step 3 - Run Pinup Capture
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python pinup.py
+        run: python pinup.py  # 여기서 핀업을 바로 실행합니다.
