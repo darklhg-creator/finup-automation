@@ -2,7 +2,7 @@ import requests
 import pandas as pd
 import os
 
-DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
 
 def check_growth(code):
     try:
