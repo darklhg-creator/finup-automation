@@ -9,68 +9,66 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
+def send_to_discord_with_image(file_path, content):
+    """디스코드에 텍스트와 이미지를 함께 보냅니다."""
+    with open(file_path, 'rb') as f:
+        payload = {'content': content}
+        files = {'file': f}
+        requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files)
+
 def main():
-    print("📱 핀업 모바일 모드 위장 접속 시작...")
+    print("📸 핀업 테마 TOP 5 이미지 캡처 분석 시작...")
     
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    
-    # [핵심] 모바일 기기(아이폰)처럼 보이게 설정
-    user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1"
-    chrome_options.add_argument(f'user-agent={user_agent}')
-    chrome_options.add_argument('--window-size=375,812') # 아이폰 크기
+    chrome_options.add_argument('--window-size=1200,1000')
+    # 유저 에이전트 추가로 차단 방지
+    chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     
     try:
-        # 모바일 테마 메인 접속
         url = "https://finup.co.kr/StockTheme/ThemeMain"
         driver.get(url)
-        time.sleep(10) # 모바일 화면 로딩 대기
+        time.sleep(10) # 페이지 전체 로딩 대기
 
-        # 모바일 버전에서는 테마 항목들이 보통 .item 또는 .theme_item_list 내부에 있습니다.
-        items = driver.find_elements(By.CSS_SELECTOR, ".item")[:5]
+        # 1. 상위 테마 5개 요소 찾기
+        items = driver.find_elements(By.CSS_SELECTOR, ".theme_item_list .item")[:5]
         
         if not items:
-            print("❌ 모바일 화면에서도 데이터를 찾지 못했습니다.")
+            print("❌ 테마 요소를 찾지 못했습니다.")
             return
-
-        report_msg = "📊 **핀업(Finup) 모바일 실시간 테마 TOP 5**\n"
-        report_msg += "==========================================\n\n"
 
         for i in range(len(items)):
             try:
-                # 엘리먼트 갱신
-                curr_items = driver.find_elements(By.CSS_SELECTOR, ".item")
-                target = curr_items[i]
+                # 루프마다 엘리먼트 갱신 (클릭 후 DOM 변화 대비)
+                current_items = driver.find_elements(By.CSS_SELECTOR, ".theme_item_list .item")
+                target = current_items[i]
                 
-                # 텍스트 추출 (모바일은 구조가 더 단순함)
-                name = target.find_element(By.CSS_SELECTOR, ".name").text.strip()
-                rate = target.find_element(By.CSS_SELECTOR, ".rate").text.strip()
+                # 테마명 추출
+                t_name = target.find_element(By.CSS_SELECTOR, ".name").text.strip()
+                t_rate = target.find_element(By.CSS_SELECTOR, ".rate").text.strip()
                 
-                # 테마 클릭하여 종목 리스트 확인
+                # 해당 테마 클릭 (하위 종목 리스트 갱신)
                 driver.execute_script("arguments[0].click();", target)
-                time.sleep(3)
+                time.sleep(3) # 하단 종목 테이블 로딩 대기
                 
-                # 종목명 추출 (모바일 리스트 클래스)
-                stock_elements = driver.find_elements(By.CSS_SELECTOR, ".stock_name")[:5]
-                stocks = [s.text.strip() for s in stock_elements if s.text.strip()]
+                # 캡처 저장
+                file_name = f"top{i+1}.png"
+                driver.save_screenshot(file_name)
+                print(f"✅ {i+1}위 테마({t_name}) 캡처 완료")
                 
-                report_msg += f"{i+1}위: 🔥 **{name}** ({rate})\n"
-                report_msg += f"└ 종목: {', '.join(stocks) if stocks else '조회 중...'}\n\n"
-            except:
-                continue
-
-        if "🔥" in report_msg:
-            requests.post(DISCORD_WEBHOOK_URL, json={"content": report_msg})
-            print("✅ 핀업 모바일 데이터 전송 완료!")
-        else:
-            print("❌ 추출된 데이터가 없습니다.")
+                # 디코로 이미지 전송
+                msg = f"📊 **핀업 테마 {i+1}위**: {t_name} ({t_rate})"
+                send_to_discord_with_image(file_name, msg)
+                
+            except Exception as e:
+                print(f"⚠️ {i+1}위 처리 중 오류: {e}")
 
     except Exception as e:
-        print(f"❌ 오류 발생: {e}")
+        print(f"❌ 전체 오류: {e}")
     finally:
         driver.quit()
 
