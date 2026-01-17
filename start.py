@@ -46,7 +46,7 @@ def main():
             except:
                 continue
 
-        # 2. 결과 정렬 및 전송
+# 2. 결과 정렬 및 전송
         if results:
             results = sorted(results, key=lambda x: x['disparity'])
             report = f"### 📊 1단계 정밀 분석 결과\n"
@@ -55,10 +55,12 @@ def main():
             
             requests.post(IGYEOK_WEBHOOK_URL, json={'content': report})
             
-    with open("targets.txt", "w", encoding="utf-8") as f:
-        # '290650,엘앤씨바이오' 이런 형식으로 한 줄씩 저장합니다.
-        lines = [f"{r['code']},{r['name']}" for r in results]
-        f.write("\n".join(lines))
+            # targets.txt 저장 (if results 안에 있어야 합니다)
+            with open("targets.txt", "w", encoding="utf-8") as f:
+                # '290650,엘앤씨바이오' 이런 형식으로 한 줄씩 저장합니다.
+                lines = [f"{r['code']},{r['name']}" for r in results]
+                f.write("\n".join(lines))
+            
             print(f"✅ 분석 완료!")
         else:
             print("🔍 조건에 맞는 종목이 없습니다.")
