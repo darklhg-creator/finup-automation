@@ -40,44 +40,21 @@ def get_disparity_stocks(codes, names, threshold):
     return results, found_any
 
 def main():
-    print("📅 [검사] 오늘 시장 개장 여부를 확인합니다...")
-    now = datetime.now()
+    print("🧪 [테스트 모드] 휴장일 체크를 건너뛰고 분석을 강제 시작합니다.")
     
-    # 1. 요일 체크 (토요일=5, 일요일=6)
-    if now.weekday() >= 5:
-        print("🏝️ 오늘은 주말입니다. 종료합니다.")
-        # 주말에는 메시지를 안 보내고 싶으시면 아래 줄을 주석 처리 하세요.
-        requests.post(DISCORD_WEBHOOK_URL, data={'content': f"🏝️ 오늘은 즐거운 주말({now.strftime('%Y-%m-%d')})입니다. 비서는 쉬러 갑니다!"})
-        return
+    # --- 아래 휴장일 체크 로직을 잠시 주석처리(#) 했습니다 ---
+    # now = datetime.now()
+    # if now.weekday() >= 5:
+    #     return
+    # --------------------------------------------------
 
-    # 2. 공휴일/휴장일 체크 (삼성전자 데이터가 아예 안 올라오는 경우)
-    now_str = now.strftime('%Y%m%d')
-    try:
-        # 최근 3일치 데이터를 가져와서 마지막 데이터 날짜가 오늘인지 확인
-        check_df = fdr.DataReader('005930').tail(1)
-        last_date = check_df.index[-1].strftime('%Y%m%d')
-        
-        # 마지막 거래일이 오늘이 아니라면 (장이 아직 안 열렸거나 휴장일인 경우)
-        if last_date != now_str:
-            print(f"🏝️ 마지막 거래일({last_date})이 오늘({now_str})과 다릅니다. 휴장일로 판단합니다.")
-            requests.post(DISCORD_WEBHOOK_URL, data={'content': f"🏝️ 오늘은 시장 휴장일입니다. (마지막 거래일: {last_date})"})
-            return
-    except Exception as e:
-        print(f"체크 중 오류: {e}")
-        return
-
-    # --- [Step 1] 개장일인 경우에만 아래 실행 ---
-    print("🔍 분석 시작...")
+    print("🔍 분석 시작 (테스트 중...)")
     df_krx = fdr.StockListing('KRX')
     df_top500 = df_krx.sort_values(by='Marcap', ascending=False).head(500)
     codes, names = df_top500['Code'].tolist(), df_top500['Name'].tolist()
 
-    under_stocks, success = get_disparity_stocks(codes, names, 90)
-    current_threshold = 90
-
-    if not success:
-        under_stocks, success = get_disparity_stocks(codes, names, 95)
-        current_threshold = 95
+    # 테스트를 위해 이격도 기준을 100으로 높여서 종목이 무조건 걸리게 함 (선택 사항)
+    under_stocks, success = get_disparity_stocks(codes, names, 95)
 
     if success:
         with open("targets.txt", "w", encoding="utf-8") as f:
@@ -89,10 +66,13 @@ def main():
                     clean_list.append(f"{code},{name}")
             f.write("\n".join(clean_list))
         
-        report_msg = f"✅ **1단계 완료 (기준: 이격도 {current_threshold}이하)**\n\n" + "\n".join(under_stocks)
+        report_msg = f"✅ **1단계 테스트 완료**\n\n" + "\n".join(under_stocks)
         requests.post(DISCORD_WEBHOOK_URL, data={'content': report_msg})
     else:
-        requests.post(DISCORD_WEBHOOK_URL, data={'content': "ℹ️ 오늘은 조건에 맞는 종목이 없습니다."})
+        # 종목이 없으면 테스트가 안되니 강제로 targets.txt 생성 (삼성전자)
+        with open("targets.txt", "w", encoding="utf-8") as f:
+            f.write("005930,삼성전자")
+        requests.post(DISCORD_WEBHOOK_URL, data={'content': "ℹ️ 테스트 중: 조건 종목이 없어 삼성전자로 대체 진행합니다."})
 
 if __name__ == "__main__":
     main()
