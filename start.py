@@ -40,39 +40,13 @@ def get_disparity_stocks(codes, names, threshold):
     return results, found_any
 
 def main():
-    print("🧪 [테스트 모드] 휴장일 체크를 건너뛰고 분석을 강제 시작합니다.")
+    print("🧪 [테스트] 휴장일 체크 없이 핀업까지 강제 진행합니다.")
     
-    # --- 아래 휴장일 체크 로직을 잠시 주석처리(#) 했습니다 ---
-    # now = datetime.now()
-    # if now.weekday() >= 5:
-    #     return
-    # --------------------------------------------------
-
-    print("🔍 분석 시작 (테스트 중...)")
-    df_krx = fdr.StockListing('KRX')
-    df_top500 = df_krx.sort_values(by='Marcap', ascending=False).head(500)
-    codes, names = df_top500['Code'].tolist(), df_top500['Name'].tolist()
-
-    # 테스트를 위해 이격도 기준을 100으로 높여서 종목이 무조건 걸리게 함 (선택 사항)
-    under_stocks, success = get_disparity_stocks(codes, names, 95)
-
-    if success:
-        with open("targets.txt", "w", encoding="utf-8") as f:
-            clean_list = []
-            for item in under_stocks:
-                match = re.search(r'\*\*(.*?)\*\*\((\d+)\)', item)
-                if match:
-                    name, code = match.groups()
-                    clean_list.append(f"{code},{name}")
-            f.write("\n".join(clean_list))
-        
-        report_msg = f"✅ **1단계 테스트 완료**\n\n" + "\n".join(under_stocks)
-        requests.post(DISCORD_WEBHOOK_URL, data={'content': report_msg})
-    else:
-        # 종목이 없으면 테스트가 안되니 강제로 targets.txt 생성 (삼성전자)
-        with open("targets.txt", "w", encoding="utf-8") as f:
-            f.write("005930,삼성전자")
-        requests.post(DISCORD_WEBHOOK_URL, data={'content': "ℹ️ 테스트 중: 조건 종목이 없어 삼성전자로 대체 진행합니다."})
+    # 분석 시작 (테스트를 위해 삼성전자 하나만이라도 명단에 넣기)
+    with open("targets.txt", "w", encoding="utf-8") as f:
+        f.write("005930,삼성전자")
+    
+    requests.post(DISCORD_WEBHOOK_URL, data={'content': "🛠️ 테스트 모드: 핀업 리포트를 불러오기 위해 1단계를 강제 통과합니다."})
 
 if __name__ == "__main__":
     main()
