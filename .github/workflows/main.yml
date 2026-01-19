@@ -13,7 +13,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # 히스토리를 가져와야 rebase 충돌이 없습니다.
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -26,23 +26,32 @@ jobs:
           pip install pandas requests beautifulsoup4 lxml yfinance
           pip install -U finance-datareader
 
-      # 1단계: 이격도 기반 후보 발굴
+      # 1단계: 이격도 기반 후보 발굴 (잘 돌아가는 start.py 유지)
       - name: Step 1 - Start
         env:
           IGYEOK_WEBHOOK_URL: ${{ secrets.IGYEOK_WEBHOOK_URL }}
         run: python start.py
 
-      # 2단계: 정배열 및 눌림목 필터링 (최종 결과 전송)
+      # 2단계: 정배열 및 눌림목 필터링 (잘 돌아가는 finance_filter.py 유지)
       - name: Step 2 - Filter
         env:
           IGYEOK_WEBHOOK_URL: ${{ secrets.IGYEOK_WEBHOOK_URL }}
         run: python finance_filter.py
 
+      # 변경 사항 저장 및 푸시 (에러 방지 로직 적용)
       - name: Commit and Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 1. 파일 변경 사항 스테이징
           git add .
+          
+          # 2. 커밋을 먼저 수행 (변경사항이 없어도 에러나지 않게 처리)
           git commit -m "Update filtered stock data" || echo "No changes to commit"
+          
+          # 3. 서버의 최신 데이터를 가져와서 합침 (rebase 에러 방지)
           git pull origin main --rebase
+          
+          # 4. 최종 푸시
           git push origin main
