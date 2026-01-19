@@ -13,12 +13,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0 # 전체 히스토리를 가져와야 충돌 해결이 쉬워집니다.
+          fetch-depth: 0 # 전체 히스토리를 가져와야 rebase 충돌 해결이 가능합니다.
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10' # yfinance 호환성을 위해 3.10 유지
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
@@ -26,19 +26,19 @@ jobs:
           pip install pandas requests beautifulsoup4 lxml selenium webdriver-manager yfinance
           pip install -U finance-datareader
 
-      - name: Step 1 - Analysis
+      - name: Step 1 - Analysis (Start)
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          IGYEOK_WEBHOOK_URL: ${{ secrets.IGYEOK_WEBHOOK_URL }}
         run: python start.py
 
-      - name: Step 2 - Filter
+      - name: Step 2 - Filter (Finance Filter)
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          IGYEOK_WEBHOOK_URL: ${{ secrets.IGYEOK_WEBHOOK_URL }}
         run: python finance_filter.py
 
-      - name: Step 3 - Pinup
+      - name: Step 3 - Pinup (Theme Analysis)
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          IGYEOK_WEBHOOK_URL: ${{ secrets.IGYEOK_WEBHOOK_URL }}
         run: python pinup.py
 
       - name: Commit and Push
@@ -46,11 +46,14 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 서버의 변경사항을 먼저 가져오고(pull), 내 파일과 합칩니다(rebase).
-          git pull origin main --rebase
-          
+          # 1. 변경된 파일(targets.txt 등)을 먼저 스테이징합니다.
           git add .
+          
+          # 2. 커밋을 먼저 해서 변경사항을 확정 짓습니다.
           git commit -m "Update stock data and filtered targets" || echo "No changes to commit"
           
-          # 충돌이 나더라도 강제로 밀어넣지 않고 안전하게 푸시합니다.
+          # 3. 그 다음 서버의 변경사항을 가져와서 합칩니다. (이제 에러가 나지 않습니다)
+          git pull origin main --rebase
+          
+          # 4. 최종적으로 서버에 푸시합니다.
           git push origin main
