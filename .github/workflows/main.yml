@@ -36,12 +36,7 @@ jobs:
           IGYEOK_WEBHOOK_URL: ${{ secrets.IGYEOK_WEBHOOK_URL }}
         run: python finance_filter.py
 
-      - name: Step 3 - Pinup (Theme Analysis)
-        env:
-          IGYEOK_WEBHOOK_URL: ${{ secrets.IGYEOK_WEBHOOK_URL }}
-        run: python pinup.py
-
-      - name: Commit and Push
+          - name: Commit and Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
