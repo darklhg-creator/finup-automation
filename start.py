@@ -36,12 +36,10 @@ def main():
             except:
                 continue
 
-        # 2. 계단식 필터링 로직 (사용자 요청 반영)
-        # 우선 90 이하인 종목만 골라봅니다.
+        # 2. 계단식 필터링 로직
         results = [r for r in all_analyzed if r['disparity'] <= 90.0]
         filter_level = "90% 이하 (초과대낙폭)"
 
-        # 만약 90 이하가 하나도 없다면, 95 이하로 범위를 넓힙니다.
         if not results:
             print("💡 이격도 90% 이하 종목이 없어 범위를 95%로 확대합니다.")
             results = [r for r in all_analyzed if r['disparity'] <= 95.0]
@@ -51,10 +49,18 @@ def main():
         if results:
             results = sorted(results, key=lambda x: x['disparity'])
             
-            report = f"### 📊 1단계 분석 결과 ({filter_level})\n"
+            # 리포트 제목 및 본문 구성
+            report = f"### 📊 이격도 분석 결과 ({filter_level})\n"
             for r in results[:30]:
                 report += f"· **{r['name']}({r['code']})**: {r['disparity']}%\n"
             
+            # --- 요청하신 체크리스트 문구 추가 ---
+            report += "\n**1. 테마별로 표로 분류**"
+            report += "\n**2. 영업이익 적자기업 제외하고 최근 기관 외국인 수급 분석**"
+            report += "\n**3. 최근 뉴스 호재 검색**"
+            # -----------------------------------
+            
+            # 디스코드 전송
             requests.post(IGYEOK_WEBHOOK_URL, json={'content': report})
             
             # 차례대로 targets.txt 저장
