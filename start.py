@@ -50,7 +50,7 @@ def main():
             results = sorted(results, key=lambda x: x['disparity'])
             
             # 리포트 제목 및 본문 구성
-            report = f"### 📊 이격도 분석 결과 ({filter_level})\n"
+            report = f"### 📊 종목 분석 결과 ({filter_level})\n"
             for r in results[:50]:
                 report += f"· **{r['name']}({r['code']})**: {r['disparity']}%\n"
             
