@@ -37,7 +37,7 @@ def main():
                 continue
 
         # 2. 계단식 필터링 로직
-        results = [r for r in all_analyzed if r['disparity'] <= 90.0]
+        results = [r for r in all_analyzed if r['disparity'] <= 93.0]
         filter_level = "90% 이하 (초과대낙폭)"
 
         if not results:
