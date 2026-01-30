@@ -1,4 +1,4 @@
-name: Stock Analysis Workflow
+name: Stock Analysis Workflow1
 
 on:
   workflow_dispatch:      # 수동 실행 가능
