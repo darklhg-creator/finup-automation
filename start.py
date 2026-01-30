@@ -8,12 +8,12 @@ import os
 IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
 
 def main():
-    print("🚀 [1단계] 계단식 이격도 분석 시작 (KOSPI 500 + KOSDAQ 500)")
+    print("🚀 [1단계] 계단식 이격도 분석 시작 (KOSPI 500 + KOSDAQ 1000)")
     
     try:
         # 1. 대상 종목 리스트 확보
         df_kospi = fdr.StockListing('KOSPI').head(500)
-        df_kosdaq = fdr.StockListing('KOSDAQ').head(500)
+        df_kosdaq = fdr.StockListing('KOSDAQ').head(1000)
         df_total = pd.concat([df_kospi, df_kosdaq])
         
         all_analyzed = []
