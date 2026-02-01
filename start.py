@@ -33,9 +33,9 @@ def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
 
     # ---------------------------------------------------------
-    # [휴장일 체크 로직]
+    # [휴장일 체크 로직 추가]
     # ---------------------------------------------------------
-    '''
+    
     # 1. 주말 체크 (월:0 ~ 일:6)
     weekday = CURRENT_KST.weekday()
     if weekday >= 5:
@@ -46,6 +46,7 @@ def main():
         sys.exit() # 프로그램 종료
 
     # 2. 공휴일 체크 (KOSPI 지수 데이터로 개장 여부 확인)
+    # 오늘 날짜의 KOSPI(KS11) 데이터가 없으면 휴장일로 간주
     try:
         check_market = fdr.DataReader('KS11', TARGET_DATE, TARGET_DATE)
         if check_market.empty:
@@ -58,13 +59,13 @@ def main():
         print(msg)
         send_discord_message(msg)
         sys.exit()
-    '''
+    
     print(f"✅ 정상 개장일입니다. 분석을 시작합니다...")
     
     # ---------------------------------------------------------
-    # [분석 로직 시작]
+    # [기존 분석 로직 시작]
     # ---------------------------------------------------------
-    print("🚀 [1단계] 이격도 및 RSI 분석 시작 (KOSPI 500 + KOSDAQ 1000)")
+    print("🚀 [1단계] 계단식 이격도 분석 시작 (KOSPI 500 + KOSDAQ 1000)")
     
     try:
         # 1. 대상 종목 리스트 확보
@@ -79,46 +80,20 @@ def main():
             code = row['Code']
             name = row['Name']
             try:
-                # RSI 계산을 위해 30일치 데이터 가져옴 (이동평균 계산 시 앞부분 데이터 필요)
                 df = fdr.DataReader(code).tail(30)
                 if len(df) < 20: continue
                 
-                # [이격도 계산]
                 current_price = df['Close'].iloc[-1]
                 ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
                 
                 if ma20 == 0 or pd.isna(ma20): continue
                     
                 disparity = round((current_price / ma20) * 100, 1)
-
-                # [RSI 계산 추가 - 14일 기준]
-                delta = df['Close'].diff(1)
-                gain = delta.where(delta > 0, 0)
-                loss = -delta.where(delta < 0, 0)
-                
-                # 14일 평균 계산 (Simple Moving Average 방식)
-                avg_gain = gain.rolling(window=14).mean().iloc[-1]
-                avg_loss = loss.rolling(window=14).mean().iloc[-1]
-                
-                if avg_loss == 0:
-                    rsi = 100 # 하락이 없으면 RSI는 100
-                else:
-                    rs = avg_gain / avg_loss
-                    rsi = 100 - (100 / (1 + rs))
-                
-                rsi = round(rsi, 1) # 소수점 1자리 반올림
-
-                # 결과 저장
-                all_analyzed.append({
-                    'name': name, 
-                    'code': code, 
-                    'disparity': disparity,
-                    'rsi': rsi 
-                })
+                all_analyzed.append({'name': name, 'code': code, 'disparity': disparity})
             except:
                 continue
 
-        # 2. 계단식 필터링 로직 (기존과 동일하게 이격도만 기준으로 필터링)
+        # 2. 계단식 필터링 로직
         results = [r for r in all_analyzed if r['disparity'] <= 93.0]
         filter_level = "이격도 93% 이하 (초과대낙폭)"
 
@@ -129,18 +104,14 @@ def main():
 
         # 3. 결과 처리 및 전송
         if results:
-            # 이격도 낮은 순서대로 정렬
             results = sorted(results, key=lambda x: x['disparity'])
             
             # 리포트 제목 및 본문 구성
             report = f"### 📊 종목 분석 결과 ({filter_level})\n"
-            report += "Format: 종목명(코드): 이격도 / RSI\n"  # 보는 법 안내 추가
-            
             for r in results[:50]:
-                # 출력 포맷 변경: 이격도 옆에 RSI 표시
-                report += f"· **{r['name']}({r['code']})**: 이격 {r['disparity']}% / RSI {r['rsi']}\n"
+                report += f"· **{r['name']}({r['code']})**: {r['disparity']}%\n"
             
-            # --- 요청하신 체크리스트 문구 ---
+            # --- 요청하신 체크리스트 문구 추가 ---
             report += "\n" + "="*30 + "\n"
             report += "📝 **[Check List]**\n"
             report += "1. 영업이익 적자기업 제외하고 테마별로 표로 분류\n"
