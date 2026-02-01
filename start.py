@@ -94,11 +94,11 @@ def main():
                 continue
 
         # 2. 계단식 필터링 로직
-        results = [r for r in all_analyzed if r['disparity'] <= 93.0]
-        filter_level = "이격도 93% 이하 (초과대낙폭)"
+        results = [r for r in all_analyzed if r['disparity'] <= 90.0]
+        filter_level = "이격도 90% 이하 (초과대낙폭)"
 
         if not results:
-            print("💡 이격도 93% 이하 종목이 없어 범위를 95%로 확대합니다.")
+            print("💡 이격도 90% 이하 종목이 없어 범위를 95%로 확대합니다.")
             results = [r for r in all_analyzed if r['disparity'] <= 95.0]
             filter_level = "이격도 95% 이하 (일반낙폭)"
 
