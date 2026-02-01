@@ -25,7 +25,7 @@ def send_discord_message(content):
         requests.post(IGYEOK_WEBHOOK_URL, json=data)
     except Exception as e:
         print(f"디스코드 전송 실패: {e}")
-'''
+
 # ==========================================
 # 2. 메인 로직
 # ==========================================
@@ -59,7 +59,7 @@ def main():
         print(msg)
         send_discord_message(msg)
         sys.exit()
-    '''
+    
     print(f"✅ 정상 개장일입니다. 분석을 시작합니다...")
     
     # ---------------------------------------------------------
