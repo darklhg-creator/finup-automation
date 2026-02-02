@@ -88,4 +88,26 @@ def main():
         try:
             df = fdr.DataReader(row['Code']).tail(30)
             if len(df) < 20: continue
-            disp = round((df['Close'].iloc[-1] / df['Close'].rolling(20).mean().iloc[-1]) * 1
+            disp = round((df['Close'].iloc[-1] / df['Close'].rolling(20).mean().iloc[-1]) * 100, 1)
+            if disp <= 95.0:
+                found.append({'c': row['Code'], 'n': row['Name'], 'd': disp})
+        except: continue
+
+    # 3. 리포트
+    report = f"### 🌍 시장 지표 ({TARGET_DATE})\n"
+    report += f"**[자금]** 예탁금: {dep}조\n"
+    report += f"**[신용]** 코스피: {ksp_c}조 / 코스닥: {ksd_c}조\n"
+    report += f"**[코스피 이격]** 일:{kp_d}% / 주:{kp_w}% / 월:{kp_m}%\n"
+    report += f"**[코스닥 이격]** 일:{kq_d}% / 주:{kq_w}% / 월:{kq_m}%\n\n"
+    
+    report += "### 🎯 종목 발굴 (이격도 95% 이하)\n"
+    for r in sorted(found, key=lambda x: x['d'])[:40]:
+        c_ratio = get_naver_credit_ratio(r['c'])
+        risk = "안전" if c_ratio < 5 else ("⚠️주의" if c_ratio < 7 else "🚫위험")
+        report += f"· **{r['n']}({r['c']})**: {r['d']}% (신용 {c_ratio}%, {risk})\n"
+        time.sleep(0.1) # 크롤링 차단 방지
+
+    send_discord_message(report)
+
+if __name__ == "__main__":
+    main()
