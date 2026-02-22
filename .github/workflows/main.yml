@@ -1,4 +1,4 @@
-name: Stock Analysis Workflow1
+name: Disparity Ratio
 
 on:
   workflow_dispatch:      # 수동 실행 가능
