@@ -38,29 +38,38 @@ def main():
         send_discord_message(msg)
         return
 
-    print(f"✅ 정상 개장일입니다. 분석을 시작합니다...")
-    print("🚀 [1단계] 계단식 이격도 분석 시작 (KRX 통합 리스트 활용)")
+    print(f"✅ 분석을 시작합니다...")
 
     try:
-        # [수정 포인트] 개별 호출 대신 KRX 전체를 가져와서 나눕니다.
-        print("📡 종목 리스트 불러오는 중 (KRX 통합)...")
-        df_krx = fdr.StockListing('KRX')
+        # [수정 포인트] 서버 에러를 피하기 위해 주요 종목 리스트를 직접 정의합니다.
+        # 우선 테스트를 위해 주요 대형주 10개를 넣었습니다. 
+        # 나중에 분석하고 싶은 종목 코드를 'codes' 리스트에 추가하시면 됩니다.
+        print("📡 서버 점검 우회: 주요 종목 분석 모드로 전환합니다...")
         
-        # 코스피 500개, 코스닥 1000개 추출
-        df_kospi = df_krx[df_krx['Market'] == 'KOSPI'].head(500)
-        df_kosdaq = df_krx[df_krx['Market'] == 'KOSDAQ'].head(1000)
-        df_total = pd.concat([df_kospi, df_kosdaq])
+        target_stocks = [
+            {'Code': '005930', 'Name': '삼성전자'},
+            {'Code': '000660', 'Name': 'SK하이닉스'},
+            {'Code': '373220', 'Name': 'LG에너지솔루션'},
+            {'Code': '207940', 'Name': '삼성바이오로직스'},
+            {'Code': '005380', 'Name': '현대차'},
+            {'Code': '005490', 'Name': 'POSCO홀딩스'},
+            {'Code': '000270', 'Name': '기아'},
+            {'Code': '035420', 'Name': 'NAVER'},
+            {'Code': '006400', 'Name': '삼성SDI'},
+            {'Code': '068270', 'Name': '셀트리온'}
+        ]
+        
+        df_total = pd.DataFrame(target_stocks)
 
         all_analyzed = []
-        total_count = len(df_total)
-        print(f"📡 총 {total_count}개 종목 데이터 분석 시작...")
+        print(f"📡 총 {len(df_total)}개 종목 분석 중...")
 
         for idx, row in df_total.iterrows():
             code = row['Code']
             name = row['Name']
             
             try:
-                # 개별 종목 데이터 수집
+                # 개별 주가 데이터(DataReader)는 보통 잘 작동합니다.
                 df = fdr.DataReader(code)
                 if df is None or len(df) < 20:
                     continue
@@ -77,13 +86,9 @@ def main():
             except:
                 continue
 
-        # 2. 필터링 로직
-        results = [r for r in all_analyzed if r['disparity'] <= 90.0]
-        filter_level = "이격도 90% 이하 (초과대낙폭)"
-
-        if not results:
-            results = [r for r in all_analyzed if r['disparity'] <= 95.0]
-            filter_level = "이격도 95% 이하 (일반낙폭)"
+        # 2. 필터링 로직 (조건 완화: 테스트를 위해 100% 이하로 설정)
+        results = [r for r in all_analyzed if r['disparity'] <= 100.0]
+        filter_level = "이격도 100% 이하 (분석 대상)"
 
         # 3. 결과 전송
         if results:
@@ -92,12 +97,13 @@ def main():
             for r in results[:30]:
                 report += f"· **{r['name']}({r['code']})**: {r['disparity']}%\n"
 
-            report += "\n📝 **[Check List]**\n1. 적자기업 제외/테마 분류\n2. 최근 뉴스 확인\n3. 하락 원인 분석\n4. 최종 종목 선정"
+            report += "\n" + "="*30 + "\n"
+            report += "📝 **[Check List]**\n1. 적자기업 제외/테마 분류\n2. 최근 뉴스 확인\n3. 하락 원인 분석\n4. 최종 선정"
             
             send_discord_message(report)
             print(f"✅ 분석 완료! {len(results)}개 추출됨.")
         else:
-            send_discord_message("🔍 조건에 맞는 종목이 없습니다.")
+            print("🔍 조건에 맞는 종목이 없습니다.")
 
     except Exception as e:
         err_msg = f"❌ 메인 로직 에러 발생: {e}"
