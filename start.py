@@ -45,21 +45,6 @@ def main():
         send_discord_message(msg)
         sys.exit() # 프로그램 종료
 
-    # 2. 공휴일 체크 (KOSPI 지수 데이터로 개장 여부 확인)
-    # 오늘 날짜의 KOSPI(KS11) 데이터가 없으면 휴장일로 간주
-    try:
-        check_market = fdr.DataReader('KS11', TARGET_DATE, TARGET_DATE)
-        if check_market.empty:
-            msg = f"⏹️ 오늘은 공휴일(장 휴무)이라 주식장이 열리지 않습니다."
-            print(msg)
-            send_discord_message(msg)
-            sys.exit() # 프로그램 종료
-    except Exception as e:
-        msg = f"⚠️ 장 운영 여부 확인 실패 ({e}). 프로그램을 종료합니다."
-        print(msg)
-        send_discord_message(msg)
-        sys.exit()
-
     print(f"✅ 정상 개장일입니다. 분석을 시작합니다...")
 
     # ---------------------------------------------------------
