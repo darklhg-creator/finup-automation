@@ -35,7 +35,7 @@ def main():
     # ---------------------------------------------------------
     # [휴장일 체크 로직 추가]
     # ---------------------------------------------------------
-    
+
     # 1. 주말 체크 (월:0 ~ 일:6)
     weekday = CURRENT_KST.weekday()
     if weekday >= 5:
@@ -59,20 +59,20 @@ def main():
         print(msg)
         send_discord_message(msg)
         sys.exit()
-    
+
     print(f"✅ 정상 개장일입니다. 분석을 시작합니다...")
-    
+
     # ---------------------------------------------------------
     # [기존 분석 로직 시작]
     # ---------------------------------------------------------
     print("🚀 [1단계] 계단식 이격도 분석 시작 (KOSPI 500 + KOSDAQ 1000)")
-    
+
     try:
         # 1. 대상 종목 리스트 확보
         df_kospi = fdr.StockListing('KOSPI').head(500)
         df_kosdaq = fdr.StockListing('KOSDAQ').head(1000)
         df_total = pd.concat([df_kospi, df_kosdaq])
-        
+
         all_analyzed = []
         print(f"📡 총 {len(df_total)}개 종목 데이터 수집 중...")
 
@@ -82,12 +82,12 @@ def main():
             try:
                 df = fdr.DataReader(code).tail(30)
                 if len(df) < 20: continue
-                
+
                 current_price = df['Close'].iloc[-1]
                 ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
-                
+
                 if ma20 == 0 or pd.isna(ma20): continue
-                    
+
                 disparity = round((current_price / ma20) * 100, 1)
                 all_analyzed.append({'name': name, 'code': code, 'disparity': disparity})
             except:
@@ -105,29 +105,31 @@ def main():
         # 3. 결과 처리 및 전송
         if results:
             results = sorted(results, key=lambda x: x['disparity'])
-            
+
             # 리포트 제목 및 본문 구성
             report = f"### 📊 종목 분석 결과 ({filter_level})\n"
             for r in results[:50]:
                 report += f"· **{r['name']}({r['code']})**: {r['disparity']}%\n"
-            
+
             # --- 요청하신 체크리스트 문구 추가 ---
             report += "\n" + "="*30 + "\n"
             report += "📝 **[Check List]**\n"
             report += "1. 영업이익 적자기업 제외하고 테마별로 표로 분류\n"
+            report += "2. 1번에서 정리한 기업들 오늘 장마감 기준 기관/외국인/연기금 수급 분석\n"
+            report += "3. 2번 기업들 최근 일주일 뉴스 및 목표주가 검색\n"
             report += "2. 1번에서 정리한 기업들 최근 일주일간 뉴스확인, 언제 뉴스인지 날자도 같이 정리 \n"
-            report += "3. 이격도가 낮아진 원인 분석\n"
-            report += "4. 태마,뉴스,이격도 떨어진 이유 종합하여 최종 종목 선정\n"
+            report += "3. 2번 기업들 목표주가 검색\n"
+            report += "4. 테마/수급/영업이익 전망 종합하여 최종 종목 선정\n"
             # -----------------------------------
-            
+
             # 디스코드 전송
             send_discord_message(report)
-            
+
             # 차례대로 targets.txt 저장
             with open("targets.txt", "w", encoding="utf-8") as f:
                 lines = [f"{r['code']},{r['name']}" for r in results]
                 f.write("\n".join(lines))
-            
+
             print(f"✅ {filter_level} 조건으로 {len(results)}개 추출 완료.")
         else:
             msg = "🔍 95% 이하 조건에도 해당되는 종목이 없습니다."
