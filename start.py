@@ -11,14 +11,12 @@ import time
 # ==========================================
 IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
 
-# [한국 시간 설정] - 서버 시간이 달라도 한국 시간으로 고정
+# [한국 시간 설정]
 KST_TIMEZONE = timezone(timedelta(hours=9))
 CURRENT_KST = datetime.now(KST_TIMEZONE)
 TARGET_DATE = CURRENT_KST.strftime("%Y-%m-%d")
-TARGET_DATE = CURRENT_KST.strftime("%Y-%m-%d") # FDR은 YYYY-MM-DD 포맷 권장
 
 # ==========================================
-# 1. 핵심 로직: KRX 및 야후 데이터 활용
 # 1. 공통 함수
 # ==========================================
 def send_discord_message(content):
@@ -30,18 +28,20 @@ def send_discord_message(content):
             for i in range(0, len(content), 2000):
                 requests.post(IGYEOK_WEBHOOK_URL, json={'content': content[i:i+2000]})
                 time.sleep(0.5)
-    except: pass
+    except Exception as e:
+        print(f"디스코드 전송 실패: {e}")
 
 def get_market_indices():
-    """야후 파이낸스 소스로 지수 이격도 계산 (네이버 차단 우회)"""
+    """야후 파이낸스 소스로 지수 이격도 계산"""
     try:
         # 코스피(^KS11), 코스닥(^KQ11)
         kospi = fdr.DataReader('^KS11', start='2024-01-01')
         kosdaq = fdr.DataReader('^KQ11', start='2024-01-01')
         
         def calc_disp(df):
-            if df.empty: return 0, 0, 0
+            if df.empty or len(df) < 20: return 0, 0, 0
             curr = df['Close'].iloc[-1]
+            # 일간(20일), 주간(20주), 월간(20월) 이격도 계산
             d = round((curr / df['Close'].rolling(20).mean().iloc[-1]) * 100, 1)
             w = round((curr / df.resample('W').last()['Close'].rolling(20).mean().iloc[-1]) * 100, 1)
             m = round((curr / df.resample('ME').last()['Close'].rolling(20).mean().iloc[-1]) * 100, 1)
@@ -50,167 +50,114 @@ def get_market_indices():
         return calc_disp(kospi), calc_disp(kosdaq)
     except:
         return (0,0,0), (0,0,0)
-        data = {'content': content}
-        requests.post(IGYEOK_WEBHOOK_URL, json=data)
-    except Exception as e:
-        print(f"디스코드 전송 실패: {e}")
 
 # ==========================================
 # 2. 메인 로직
 # ==========================================
 def main():
-    print(f"[{TARGET_DATE}] KRX 기반 분석 시작...")
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
 
-    # ---------------------------------------------------------
-    # [휴장일 체크 로직 추가]
-    # ---------------------------------------------------------
-
-    # 1. 시장 지수 정보 (야후 소스)
-    kp, kq = get_market_indices()
-    # 1. 주말 체크 (월:0 ~ 일:6)
+    # [1] 휴장일 체크
     weekday = CURRENT_KST.weekday()
     if weekday >= 5:
         day_name = "토요일" if weekday == 5 else "일요일"
         msg = f"⏹️ 오늘은 주말({day_name})이라 주식장이 열리지 않습니다."
         print(msg)
         send_discord_message(msg)
-        sys.exit() # 프로그램 종료
+        return
 
-    # 2. 공휴일 체크 (KOSPI 지수 데이터로 개장 여부 확인)
-    # 오늘 날짜의 KOSPI(KS11) 데이터가 없으면 휴장일로 간주
     try:
         check_market = fdr.DataReader('KS11', TARGET_DATE, TARGET_DATE)
         if check_market.empty:
             msg = f"⏹️ 오늘은 공휴일(장 휴무)이라 주식장이 열리지 않습니다."
             print(msg)
             send_discord_message(msg)
-            sys.exit() # 프로그램 종료
-    except Exception as e:
-        msg = f"⚠️ 장 운영 여부 확인 실패 ({e}). 프로그램을 종료합니다."
-        print(msg)
-        send_discord_message(msg)
-        sys.exit()
+            return
+    except:
+        print("⚠️ 장 운영 여부 확인 중 오류 발생 (진행함)")
 
-    # 2. KRX 전체 종목 리스트 확보 (공식 소스)
+    # [2] 시장 지수 정보 수집
+    kp, kq = get_market_indices()
+
+    # [3] 종목 리스트 확보 (KRX)
     print("📡 KRX 종목 리스트 수집 중...")
-    df_krx = fdr.StockListing('KRX') # 네이버 대신 KRX 공식 리스트
-    print(f"✅ 정상 개장일입니다. 분석을 시작합니다...")
-
-    # 분석 대상 축소 (상위 종목 위주로 속도 향상)
+    df_krx = fdr.StockListing('KRX')
+    # 분석 대상 (KOSPI, KOSDAQ 상위 종목 중심)
     stocks = df_krx[df_krx['Market'].isin(['KOSPI', 'KOSDAQ'])].head(1200)
-    # ---------------------------------------------------------
-    # [기존 분석 로직 시작]
-    # ---------------------------------------------------------
-    print("🚀 [1단계] 계단식 이격도 분석 시작 (KOSPI 500 + KOSDAQ 1000)")
 
+    # [4] 개별 종목 분석
     all_analyzed = []
+    print(f"🚀 [1단계] 이격도 분석 시작 (대상: {len(stocks)}개 종목)")
+
     for _, row in stocks.iterrows():
         try:
             code, name = row['Code'], row['Name']
-            # 주가 데이터 수집
             df = fdr.DataReader(code).tail(30)
             if len(df) < 20: continue
-    try:
-        # 1. 대상 종목 리스트 확보
-        df_kospi = fdr.StockListing('KOSPI').head(500)
-        df_kosdaq = fdr.StockListing('KOSDAQ').head(1000)
-        df_total = pd.concat([df_kospi, df_kosdaq])
-        
-        all_analyzed = []
-        print(f"📡 총 {len(df_total)}개 종목 데이터 수집 중...")
 
-        for idx, row in df_total.iterrows():
-            code = row['Code']
-            name = row['Name']
-            try:
-                df = fdr.DataReader(code).tail(30)
-                if len(df) < 20: continue
-                
-                current_price = df['Close'].iloc[-1]
-                ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
-                
-                if ma20 == 0 or pd.isna(ma20): continue
-                    
-                disparity = round((current_price / ma20) * 100, 1)
-                all_analyzed.append({'name': name, 'code': code, 'disparity': disparity})
-            except:
-                continue
+            current_price = df['Close'].iloc[-1]
+            ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
+            
+            if ma20 == 0 or pd.isna(ma20): continue
+            
+            disparity = round((current_price / ma20) * 100, 1)
+            credit = row.get('MarginRate', 0) # 신용비율 데이터가 있을 경우
 
-        # 2. 계단식 필터링 로직
-        results = [r for r in all_analyzed if r['disparity'] <= 90.0]
-        filter_level = "이격도 90% 이하 (초과대낙폭)"
+            all_analyzed.append({
+                'name': name, 
+                'code': code, 
+                'disparity': disparity,
+                'credit': credit
+            })
+        except:
+            continue
 
-        if not results:
-            print("💡 이격도 90% 이하 종목이 없어 범위를 95%로 확대합니다.")
-            results = [r for r in all_analyzed if r['disparity'] <= 95.0]
-            filter_level = "이격도 95% 이하 (일반낙폭)"
+    # [5] 계단식 필터링
+    results = [r for r in all_analyzed if r['disparity'] <= 90.0]
+    filter_level = "이격도 90% 이하 (초과대낙폭)"
 
-        # 3. 결과 처리 및 전송
-        if results:
-            results = sorted(results, key=lambda x: x['disparity'])
-
-            curr = df['Close'].iloc[-1]
-            ma20 = df['Close'].rolling(20).mean().iloc[-1]
-            disp = round((curr / ma20) * 100, 1)
-            # 리포트 제목 및 본문 구성
-            report = f"### 📊 종목 분석 결과 ({filter_level})\n"
-            for r in results[:50]:
-                report += f"· **{r['name']}({r['code']})**: {r['disparity']}%\n"
-
-            # 신용비율 정보가 StockListing에 포함되어 있는지 확인 (일부 환경)
-            # 없으면 기존 크롤링 방식을 쓰되, 차단 방지를 위해 딜레이 강화
-            credit = row.get('MarginRate', 0) # KRX 데이터에 포함된 경우 활용
-            # --- 요청하신 체크리스트 문구 추가 ---
-            report += "\n" + "="*30 + "\n"
-            report += "📝 **[Check List]**\n"
-            report += "1. 영업이익 적자기업 제외하고 테마별로 표로 분류\n"
-            report += "2. 1번에서 정리한 기업들 오늘 장마감 기준 기관/외국인/연기금 수급 분석\n"
-            report += "3. 2번 기업들 최근 일주일 뉴스 및 목표주가 검색\n"
-            report += "4. 테마/수급/영업이익 전망 종합하여 최종 종목 선정\n"
-            # -----------------------------------
-
-            all_analyzed.append({'c': code, 'n': name, 'd': disp, 'cr': credit})
-        except: continue
-
-    # 3. 계단식 필터링 로직
-    results = [r for r in all_analyzed if r['d'] <= 90.0]
-    filter_msg = "90% 이하 (초과대낙폭)"
     if len(results) < 10:
-        results = [r for r in all_analyzed if r['d'] <= 95.0]
-        filter_msg = "95% 이하 (일반낙폭)"
+        results = [r for r in all_analyzed if r['disparity'] <= 95.0]
+        filter_level = "이격도 95% 이하 (일반낙폭)"
 
-    # 4. 리포트 생성
-    report = f"### 🌍 KRX 시장 현황 ({TARGET_DATE})\n"
-    report += f"**[코스피 이격]** 일:{kp[0]}% / 주:{kp[1]}% / 월:{kp[2]}%\n"
-    report += f"**[코스닥 이격]** 일:{kq[0]}% / 주:{kq[1]}% / 월:{kq[2]}%\n\n"
-    
-    report += f"### 🎯 분석 결과 ({filter_msg})\n"
-    
-    for r in sorted(results, key=lambda x: x['d'])[:40]:
-        risk = "안전" if r['cr'] < 5 else "주의"
-        # 신용 데이터가 KRX 리스트에 없을 경우 0으로 표기되는 한계는 있음
-        report += f"· **{r['n']}({r['c']})**: {r['d']}% (신용 {r['cr']}%, {risk})\n"
-            # 디스코드 전송
-            send_discord_message(report)
-            
-            # 차례대로 targets.txt 저장
-            with open("targets.txt", "w", encoding="utf-8") as f:
-                lines = [f"{r['code']},{r['name']}" for r in results]
-                f.write("\n".join(lines))
-            
-            print(f"✅ {filter_level} 조건으로 {len(results)}개 추출 완료.")
-        else:
-            msg = "🔍 95% 이하 조건에도 해당되는 종목이 없습니다."
-            print(msg)
-            send_discord_message(msg)
+    # [6] 리포트 생성 및 전송
+    if results:
+        results = sorted(results, key=lambda x: x['disparity'])
+        
+        report = f"### 🌍 KRX 시장 현황 ({TARGET_DATE})\n"
+        report += f"**[코스피 이격]** 일:{kp[0]}% / 주:{kp[1]}% / 월:{kp[2]}%\n"
+        report += f"**[코스닥 이격]** 일:{kq[0]}% / 주:{kq[1]}% / 월:{kq[2]}%\n\n"
+        report += f"### 🎯 분석 결과 ({filter_level})\n"
+        
+        for r in results[:40]:
+            risk = "안전" if r['credit'] < 5 else "주의"
+            report += f"· **{r['name']}({r['code']})**: {r['disparity']}% (신용 {r['credit']}%, {risk})\n"
 
-    send_discord_message(report)
-    print("✅ 분석 리포트 전송 완료")
-    except Exception as e:
-        err_msg = f"❌ 에러 발생: {e}"
-        print(err_msg)
-        send_discord_message(err_msg)
+        # 체크리스트 추가
+        report += "\n" + "="*30 + "\n"
+        report += "📝 **[Check List]**\n"
+        report += "1. 영업이익 적자기업 제외하고 테마별로 표로 분류\n"
+        report += "2. 기관/외국인/연기금 수급 분석\n"
+        report += "3. 최근 일주일 뉴스 및 목표주가 검색\n"
+        report += "4. 테마/수급/영업이익 전망 종합 최종 선정\n"
+
+        send_discord_message(report)
+        
+        # targets.txt 저장
+        with open("targets.txt", "w", encoding="utf-8") as f:
+            lines = [f"{r['code']},{r['name']}" for r in results]
+            f.write("\n".join(lines))
+        
+        print(f"✅ 분석 완료 및 리포트 전송 완료 (추출된 종목: {len(results)}개)")
+    else:
+        msg = "🔍 조건에 해당되는 종목이 없습니다."
+        print(msg)
+        send_discord_message(msg)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        err_msg = f"❌ 시스템 오류 발생: {e}"
+        print(err_msg)
+        send_discord_message(err_msg)
