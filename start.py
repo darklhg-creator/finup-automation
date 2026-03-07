@@ -28,9 +28,8 @@ def send_discord_message(content):
 # 2. pykrx로 종목 리스트 가져오기
 # ==========================================
 def get_stock_list():
-    """pykrx를 사용해 KOSPI/KOSDAQ 종목 리스트 반환"""
-    date_str = TARGET_DATE.replace("-", "")  # "20250307" 형식
-    
+    date_str = TARGET_DATE.replace("-", "")
+
     kospi_tickers = stock.get_market_ticker_list(date_str, market="KOSPI")
     kosdaq_tickers = stock.get_market_ticker_list(date_str, market="KOSDAQ")
 
@@ -48,7 +47,15 @@ def get_stock_list():
 # 3. 메인 로직
 # ==========================================
 def main():
-    print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)"
+    print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
+    print("✅ 분석을 시작합니다...")
+
+    try:
+        print("📡 종목 리스트 불러오는 중...")
+        df_final_list = get_stock_list()
+
+        if df_final_list.empty:
+            raise Exception("종목 리스트가 비어있습니다. 휴장일일 수 있습니다.")
 
         all_analyzed = []
         total_len = len(df_final_list)
@@ -75,7 +82,6 @@ def main():
             except:
                 continue
 
-            # 서버 부하 방지: 50개마다 잠깐 대기
             if idx % 50 == 0:
                 time.sleep(0.5)
 
