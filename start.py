@@ -24,10 +24,39 @@ def send_discord_message(content):
         print(f"디스코드 전송 실패: {e}")
 
 # ==========================================
-# 2. 날짜별 전체 종목 시세 한번에 가져오기
+# 2. 휴장일 체크
+# ==========================================
+def is_holiday():
+    """오늘이 주말이면 True, 공휴일이면 True 반환"""
+    # 주말 체크
+    if CURRENT_KST.weekday() >= 5:
+        return True
+
+    # 공휴일 체크: 오늘 날짜로 API 호출해서 데이터 없으면 휴장일
+    today_str = CURRENT_KST.strftime("%Y%m%d")
+    url = "https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo"
+    params = {
+        "serviceKey": API_KEY,
+        "numOfRows": "1",
+        "pageNo": "1",
+        "resultType": "json",
+        "basDt": today_str
+    }
+    try:
+        res = requests.get(url, params=params, timeout=10)
+        data = res.json()
+        total = int(data['response']['body']['totalCount'])
+        if total == 0:
+            return True
+    except:
+        pass
+
+    return False
+
+# ==========================================
+# 3. 날짜별 전체 종목 시세 한번에 가져오기
 # ==========================================
 def get_all_stocks_by_date(date_str):
-    """특정 날짜의 전체 종목 시세를 한번에 가져오기"""
     url = "https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo"
     all_items = []
     page = 1
@@ -64,14 +93,12 @@ def get_all_stocks_by_date(date_str):
     return all_items
 
 # ==========================================
-# 3. 최근 20 거래일 날짜 리스트 구하기
+# 4. 최근 20 거래일 날짜 리스트 구하기
 # ==========================================
 def get_recent_trading_dates(n=20):
-    """최근 n개 거래일 날짜 리스트 반환"""
     dates = []
     date = CURRENT_KST
 
-    # 오늘이 주말이거나 장 마감 전이면 어제부터
     if date.weekday() >= 5 or date.hour < 15 or (date.hour == 15 and date.minute < 30):
         date = date - timedelta(days=1)
 
@@ -101,19 +128,25 @@ def get_recent_trading_dates(n=20):
     return sorted(dates)
 
 # ==========================================
-# 4. 메인 로직
+# 5. 메인 로직
 # ==========================================
 def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
+
+    # 휴장일 체크
+    if is_holiday():
+        msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
+        print(msg)
+        send_discord_message(msg)
+        return
+
     print("✅ 분석을 시작합니다...")
 
     try:
-        # 최근 20 거래일 날짜 가져오기
         print("📅 최근 20 거래일 날짜 조회 중...")
         trading_dates = get_recent_trading_dates(20)
         print(f"✅ 거래일 확인: {trading_dates[0]} ~ {trading_dates[-1]}")
 
-        # 날짜별로 전체 종목 데이터 수집
         print("📡 날짜별 전체 종목 시세 수집 중... (20번 호출)")
         date_data = {}
         for i, date_str in enumerate(trading_dates):
@@ -139,7 +172,6 @@ def main():
 
         print(f"✅ 총 {len(date_data)}개 종목 데이터 수집 완료")
 
-        # 이격도 계산
         all_analyzed = []
         for code, info in date_data.items():
             prices = info['prices']
@@ -160,12 +192,10 @@ def main():
                 'disparity': disparity
             })
 
-        # KOSPI 500, KOSDAQ 1000으로 제한
         kospi = [r for r in all_analyzed if r['market'] == 'KOSPI'][:500]
         kosdaq = [r for r in all_analyzed if r['market'] == 'KOSDAQ'][:1000]
         all_analyzed = kospi + kosdaq
 
-        # 계단식 필터링
         results = [r for r in all_analyzed if r['disparity'] <= 90.0]
         filter_level = "이격도 90% 이하 (초과대낙폭)"
 
