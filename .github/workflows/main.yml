@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas requests beautifulsoup4 lxml yfinance pykrx
+          pip install pandas requests beautifulsoup4 lxml yfinance
           pip install -U finance-datareader
       - name: Step 1 - Start
         env:
