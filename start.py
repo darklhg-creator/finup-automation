@@ -120,41 +120,75 @@ def get_recent_trading_dates(n=20):
         date = date - timedelta(days=1)
         time.sleep(0.1)
 
-    return sorted(dates)
+    return sorted(dates)  # 오래된 날짜부터 정렬
 
 # ==========================================
-# 5. 지수 이격도 계산 (코스피/코스닥)
+# 5. 코스피/코스닥 지수 이격도 가져오기
 # ==========================================
-def get_index_disparity(date_data, market):
-    """코스피 또는 코스닥 전체 평균 이격도 계산"""
-    disparities = []
-    for code, info in date_data.items():
-        if info['market'] != market:
-            continue
-        prices = info['prices']
-        if len(prices) < 20:
-            continue
-        current_price = prices[-1]
-        ma20 = sum(prices[-20:]) / 20
-        if ma20 == 0:
-            continue
-        disparity = (current_price / ma20) * 100
-        disparities.append(disparity)
+def get_index_disparity():
+    """공공데이터포털에서 코스피/코스닥 지수 데이터로 이격도 계산"""
+    print("📈 코스피/코스닥 지수 이격도 계산 중...")
+    result = {}
 
-    if not disparities:
-        return None
+    url = "https://apis.data.go.kr/1160100/service/GetMarketIndexInfoService/getStockMarketIndex"
 
-    return round(sum(disparities) / len(disparities), 1)
+    for idx_name, key in [("코스피", "KOSPI"), ("코스닥", "KOSDAQ")]:
+        params = {
+            "serviceKey": API_KEY,
+            "numOfRows": "30",
+            "pageNo": "1",
+            "resultType": "json",
+            "idxNm": idx_name
+        }
+        try:
+            res = requests.get(url, params=params, timeout=15)
+            data = res.json()
+            items = data['response']['body']['items']['item']
 
-def get_index_comment(disparity):
+            if isinstance(items, dict):
+                items = [items]
+
+            # 날짜순 정렬
+            items = sorted(items, key=lambda x: x.get('basDt', ''))
+
+            if len(items) < 20:
+                print(f"⚠️ {idx_name} 데이터 부족: {len(items)}개")
+                result[key] = None
+                continue
+
+            closes = []
+            for item in items:
+                try:
+                    close = float(str(item.get('clpr', '0')).replace(',', ''))
+                    closes.append(close)
+                except:
+                    pass
+
+            if len(closes) < 20:
+                result[key] = None
+                continue
+
+            current = closes[-1]
+            ma20 = sum(closes[-20:]) / 20
+            disparity = round((current / ma20) * 100, 2)
+            result[key] = disparity
+            print(f"✅ {idx_name} 이격도: {disparity}%")
+
+        except Exception as e:
+            print(f"{idx_name} 지수 오류: {e}")
+            result[key] = None
+
+    return result
+
+def get_index_comment(name, disparity):
     if disparity is None:
-        return "데이터 없음"
+        return f"· {name}: 데이터 없음"
     elif disparity >= 110:
-        return f"{disparity}% ⚠️ 시장이 과열되었습니다. 비중 조절해주세요"
+        return f"· {name}: {disparity}% ⚠️ 시장이 과열되었습니다. 비중 조절해주세요"
     elif disparity <= 80:
-        return f"{disparity}% ✅ 비중을 늘려도 될 타이밍입니다"
+        return f"· {name}: {disparity}% ✅ 비중을 늘려도 될 타이밍입니다"
     else:
-        return f"{disparity}% 📊 보통 수준입니다"
+        return f"· {name}: {disparity}% 📊 보통 수준입니다"
 
 # ==========================================
 # 6. 메인 로직
@@ -163,11 +197,11 @@ def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
 
     # 휴장일 체크
-    #if is_holiday():
-    #    msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
-    #    print(msg)
-    #    send_discord_message(msg)
-    #    return
+    if is_holiday():
+        msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
+        print(msg)
+        send_discord_message(msg)
+        return
 
     print("✅ 분석을 시작합니다...")
 
@@ -178,6 +212,7 @@ def main():
         print(f"✅ 거래일 확인: {trading_dates[0]} ~ {trading_dates[-1]}")
 
         # 날짜별로 전체 종목 데이터 수집
+        # 날짜:가격 딕셔너리로 저장해서 순서 보장
         print("📡 날짜별 전체 종목 시세 수집 중... (20번 호출)")
         date_data = {}
         for i, date_str in enumerate(trading_dates):
@@ -192,25 +227,24 @@ def main():
                     date_data[code] = {
                         'name': item.get('itmsNm', ''),
                         'market': market,
-                        'prices': []
+                        'prices': {}  # 날짜:가격 딕셔너리
                     }
                 try:
                     price = float(str(item.get('clpr', '0')).replace(',', ''))
-                    date_data[code]['prices'].append(price)
+                    date_data[code]['prices'][date_str] = price  # 날짜 키로 저장
                 except:
                     pass
             time.sleep(0.3)
 
         print(f"✅ 총 {len(date_data)}개 종목 데이터 수집 완료")
 
-        # 코스피/코스닥 평균 이격도 계산
-        kospi_disparity = get_index_disparity(date_data, 'KOSPI')
-        kosdaq_disparity = get_index_disparity(date_data, 'KOSDAQ')
-
-        # 이격도 계산
+        # 이격도 계산 (날짜 정렬 후 계산)
         all_analyzed = []
         for code, info in date_data.items():
-            prices = info['prices']
+            # 날짜순 정렬해서 가격 리스트 만들기
+            sorted_dates = sorted(info['prices'].keys())
+            prices = [info['prices'][d] for d in sorted_dates]
+
             if len(prices) < 20:
                 continue
 
@@ -220,7 +254,7 @@ def main():
             if ma20 == 0:
                 continue
 
-            disparity = round((current_price / ma20) * 100, 1)
+            disparity = round((current_price / ma20) * 100, 2)  # 소수점 2자리로 정확도 향상
             all_analyzed.append({
                 'name': info['name'],
                 'code': code,
@@ -242,6 +276,9 @@ def main():
             results = [r for r in all_analyzed if r['disparity'] <= 95.0]
             filter_level = "이격도 95% 이하 (일반낙폭)"
 
+        # 코스피/코스닥 지수 이격도
+        index_disparity = get_index_disparity()
+
         if results:
             results = sorted(results, key=lambda x: x['disparity'])
 
@@ -258,8 +295,8 @@ def main():
 
             report += "\n" + "="*30 + "\n"
             report += "📈 **[시장 이격도]**\n"
-            report += f"· KOSPI: {get_index_comment(kospi_disparity)}\n"
-            report += f"· KOSDAQ: {get_index_comment(kosdaq_disparity)}\n"
+            report += get_index_comment("KOSPI", index_disparity.get('KOSPI')) + "\n"
+            report += get_index_comment("KOSDAQ", index_disparity.get('KOSDAQ')) + "\n"
 
             send_discord_message(report)
             print(f"✅ {len(results)}개 추출 및 전송 완료.")
