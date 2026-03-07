@@ -2,6 +2,8 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 import time
+import zipfile
+import io
 
 # ==========================================
 # 0. 사용자 설정
@@ -50,53 +52,75 @@ def is_holiday():
     return False
 
 # ==========================================
-# 3. DART 전체 기업 영업이익 한번에 가져오기
+# 3. DART 재무정보 ZIP으로 한번에 가져오기
 # ==========================================
 def get_profit_dict():
+    """DART 재무정보 일괄다운로드로 전체 기업 영업이익 한번에 가져오기"""
     print("📊 DART 전체 기업 영업이익 수집 중...")
     profit_dict = {}
     target_year = str(CURRENT_KST.year - 1)
-    url = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json"
 
-    for fs_div in ["CFS", "OFS"]:
-        params = {
-            "crtfc_key": DART_API_KEY,
-            "bsns_year": target_year,
-            "reprt_code": "11011",
-            "fs_div": fs_div
-        }
-        try:
-            res = requests.get(url, params=params, timeout=60)
-            data = res.json()
+    url = "https://opendart.fss.or.kr/api/fnlttXbrlDs002.xml"
+    params = {
+        "crtfc_key": DART_API_KEY,
+        "bsns_year": target_year,
+        "reprt_code": "11011"
+    }
 
-            if data.get('status') != '000':
-                print(f"DART {fs_div} 오류: {data.get('message')}")
-                continue
+    try:
+        res = requests.get(url, params=params, timeout=60)
+        zf = zipfile.ZipFile(io.BytesIO(res.content))
+        print(f"✅ ZIP 파일 수신 완료, 파일 목록: {zf.namelist()}")
 
-            items = data.get('list', [])
-            print(f"✅ DART {fs_div} {len(items)}건 수신")
-
-            for item in items:
-                stock_code = item.get('stock_code', '').strip()
-                account_nm = item.get('account_nm', '')
-
-                if not stock_code:
-                    continue
-                if stock_code in profit_dict and fs_div == 'OFS':
-                    continue
-
-                if '영업이익' in account_nm:
+        for fname in zf.namelist():
+            if fname.endswith('.csv') or fname.endswith('.tsv'):
+                with zf.open(fname) as f:
                     try:
-                        amount_str = str(item.get('thstrm_amount', '0') or '0').replace(',', '').strip()
-                        if amount_str in ['', '-']:
-                            amount_str = '0'
-                        amount = int(amount_str)
-                        profit_dict[stock_code] = '흑자' if amount > 0 else '적자'
+                        df = pd.read_csv(f, encoding='utf-8', sep='\t' if fname.endswith('.tsv') else ',')
                     except:
-                        pass
+                        f.seek(0)
+                        df = pd.read_csv(f, encoding='cp949', sep='\t' if fname.endswith('.tsv') else ',')
 
-        except Exception as e:
-            print(f"DART {fs_div} 수집 오류: {e}")
+                    print(f"파일: {fname}, 컬럼: {list(df.columns)[:5]}")
+
+                    # 영업이익 행 찾기
+                    for col in df.columns:
+                        if '계정' in col or 'account' in col.lower():
+                            acct_col = col
+                            break
+                    else:
+                        continue
+
+                    stock_col = None
+                    for col in df.columns:
+                        if '종목' in col or 'stock' in col.lower():
+                            stock_col = col
+                            break
+
+                    amount_col = None
+                    for col in df.columns:
+                        if '당기' in col or 'amount' in col.lower():
+                            amount_col = col
+                            break
+
+                    if not stock_col or not amount_col:
+                        continue
+
+                    df_profit = df[df[acct_col].str.contains('영업이익', na=False)]
+                    for _, row in df_profit.iterrows():
+                        code = str(row.get(stock_col, '')).strip().zfill(6)
+                        try:
+                            amount_str = str(row.get(amount_col, '0')).replace(',', '').strip()
+                            if amount_str in ['', '-', 'nan']:
+                                amount_str = '0'
+                            amount = int(float(amount_str))
+                            if code not in profit_dict:
+                                profit_dict[code] = '흑자' if amount > 0 else '적자'
+                        except:
+                            pass
+
+    except Exception as e:
+        print(f"DART ZIP 수집 오류: {e}")
 
     print(f"✅ 영업이익 데이터 {len(profit_dict)}개 종목 완료")
     return profit_dict
@@ -240,7 +264,6 @@ def main():
 
             disparity = round((current_price / ma20) * 100, 1)
 
-            # DART 영업이익으로 흑자/적자 판단
             profit_status = profit_dict.get(code, '')
             if profit_status == '흑자':
                 profit_label = '[흑자]'
