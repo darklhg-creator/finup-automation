@@ -222,12 +222,12 @@ def main():
         if results:
             results = sorted(results, key=lambda x: x['disparity'])
 
-            report += "📈 **[시장 이격도]**\n"
+            report = "📈 **[시장 이격도]**\n"
             report += get_index_comment("KOSPI", index_disparity.get('KOSPI')) + "\n"
             report += get_index_comment("KOSDAQ", index_disparity.get('KOSDAQ')) + "\n"
-            
-            report += "\n" + "="*30 + "\n"           
-            report = f"### 📊 종목 분석 결과 ({filter_level})\n"
+
+            report += "\n" + "="*30 + "\n"
+            report += f"### 📊 종목 분석 결과 ({filter_level})\n"
             for r in results[:40]:
                 report += f"· **{r['name']}({r['code']})**: {r['disparity']}%\n"
 
@@ -237,8 +237,6 @@ def main():
             report += "2. 최근 일주일간 뉴스 및 날짜 확인\n"
             report += "3. 이격도 하락 원인 분석\n"
             report += "4. 종합 판단 후 최종 종목 선정\n"
-
-
 
             send_discord_message(report)
             print(f"✅ {len(results)}개 추출 및 전송 완료.")
