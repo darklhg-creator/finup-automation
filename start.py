@@ -2,11 +2,13 @@ import requests
 
 KRX_API_KEY = "5AB85D9D43EA4FAA9BC1907303BAFDC2C0377C5B"
 
-# 코스피 종목 시세 테스트
-url = "http://data-dbg.krx.co.kr/svc/apis/sto/stk_bydd_trd"
+# 올바른 KRX OpenAPI URL로 테스트
+url = "https://openapi.krx.co.kr/contents/COM/GenerateOTP.jspx"
 params = {
     "AUTH_KEY": KRX_API_KEY,
-    "BAS_DD": "20260306"
+    "bld": "dbms/MDC/STAT/standard/MDCSTAT01501",
+    "name": "fileDown",
+    "filetype": "json"
 }
 
 res = requests.get(url, params=params, timeout=10)
