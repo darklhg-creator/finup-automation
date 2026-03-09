@@ -1,12 +1,16 @@
 import requests
-from bs4 import BeautifulSoup
 
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+API_KEY = "62e0d95b35661ef8e1f9a665ef46cc7cd64a3ace4d179612dda40c847f6bdb7e"
+
+# 고객예탁금 테스트
+url = "https://apis.data.go.kr/1160100/service/GetFSSInvstgInfoService/getInvstgTrnstnInfo"
+params = {
+    "serviceKey": API_KEY,
+    "numOfRows": "5",
+    "pageNo": "1",
+    "resultType": "json"
 }
 
-# KOFIA 고객예탁금/신용잔고
-url = "https://www.kofia.or.kr/brd/m_215/view.do"
-res = requests.get(url, headers=headers, timeout=10)
+res = requests.get(url, params=params, timeout=10)
 print("상태코드:", res.status_code)
-print("응답:", res.text[:300])
+print("응답:", res.text[:500])
