@@ -228,7 +228,7 @@ def main():
 
             report += "\n" + "="*30 + "\n"
             report += f"### 📊 종목 분석 결과 ({filter_level})\n"
-            for r in results[:40]:
+            for r in results[:50]:
                 report += f"· **{r['name']}({r['code']})**: {r['disparity']}%\n"
 
             report += "\n" + "="*30 + "\n"
