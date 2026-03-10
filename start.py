@@ -236,7 +236,7 @@ def main():
             report += "1. 영업이익 적자기업 제외하고 테마별로 표로 분류\n"
             report += "2. 최근 일주일간 뉴스 및 날짜 확인\n"
             report += "3. 이격도 하락 원인 분석\n"
-            report += "4. 종합 판단 후 최종 종목 선정\n"
+            report += "4. 펀더멘탈 거버넌스 벨류에이션 및 최근 일주일간 호재와  강세섹터 종합 판단 후 최종 종목 선정\n"
 
             send_discord_message(report)
             print(f"✅ {len(results)}개 추출 및 전송 완료.")
