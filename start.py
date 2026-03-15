@@ -318,11 +318,11 @@ def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
     print(f"📅 DART 조회 기준연도: {BSNS_YEAR}")
 
-    if is_holiday():
-        msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
-        print(msg)
-        send_discord_message(msg)
-        return
+    #if is_holiday():
+    #    msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
+    #    print(msg)
+    #    send_discord_message(msg)
+    #    return
 
     print("✅ 분석을 시작합니다...")
 
