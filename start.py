@@ -161,7 +161,6 @@ def get_krx_filter():
                 code = item.get('ISU_CD', '')
                 sect = item.get('SECT_TP_NM', '').strip()
                 volume = item.get('ACC_TRDVOL', '0')
-
                 if '관리' in sect:
                     exclude_codes.add(code)
                 try:
@@ -226,7 +225,7 @@ def get_dart_info(corp_code):
                 except:
                     amount = None
 
-                if sj == 'IS' and account == '당기순이익':
+                if sj == 'IS' and account == '당기순이익(손실)':
                     net_income = amount
                 if sj == 'BS' and account == '자산총계':
                     total_assets = amount
@@ -247,7 +246,94 @@ def get_dart_info(corp_code):
     return None, None
 
 # ==========================================
-# 7. 이격도 계산 (멀티스레딩용)
+# 7. 고객예탁금 + 신용잔고 조회
+# ==========================================
+def get_market_capital_info():
+    print("💰 고객예탁금/신용잔고 조회 중...")
+    base = "https://apis.data.go.kr/1160100/service/GetKofiaStatisticsInfoService"
+
+    try:
+        res = requests.get(base + "/getSecuritiesMarketTotalCapitalInfo", params={
+            "serviceKey": API_KEY,
+            "numOfRows": "2",
+            "pageNo": "1",
+            "resultType": "json"
+        }, timeout=10)
+        deposit_data = res.json()['response']['body']['items']['item']
+        if isinstance(deposit_data, dict):
+            deposit_data = [deposit_data]
+        deposit_data = sorted(deposit_data, key=lambda x: x['basDt'], reverse=True)
+
+        res = requests.get(base + "/getGrantingOfCreditBalanceInfo", params={
+            "serviceKey": API_KEY,
+            "numOfRows": "2",
+            "pageNo": "1",
+            "resultType": "json"
+        }, timeout=10)
+        credit_data = res.json()['response']['body']['items']['item']
+        if isinstance(credit_data, dict):
+            credit_data = [credit_data]
+        credit_data = sorted(credit_data, key=lambda x: x['basDt'], reverse=True)
+
+        today_deposit = int(deposit_data[0]['invrDpsgAmt'])
+        today_credit = int(credit_data[0]['crdTrFingWhl'])
+        prev_credit = int(credit_data[1]['crdTrFingWhl']) if len(credit_data) > 1 else None
+
+        credit_ratio = round((today_credit / today_deposit) * 100, 2)
+
+        credit_change = None
+        if prev_credit and prev_credit > 0:
+            credit_change = round((today_credit - prev_credit) / prev_credit * 100, 2)
+
+        print(f"✅ 고객예탁금: {today_deposit/1e12:.1f}조, 신용잔고: {today_credit/1e12:.1f}조, 비율: {credit_ratio}%")
+
+        return {
+            'deposit': today_deposit,
+            'credit': today_credit,
+            'credit_ratio': credit_ratio,
+            'credit_change': credit_change
+        }
+
+    except Exception as e:
+        print(f"고객예탁금/신용잔고 조회 오류: {e}")
+        return None
+
+def get_capital_comment(info):
+    if info is None:
+        return "· 고객예탁금/신용잔고: 데이터 없음\n"
+
+    deposit_str = f"{info['deposit']/1e12:.1f}조"
+    credit_str = f"{info['credit']/1e12:.1f}조"
+    ratio = info['credit_ratio']
+    change = info['credit_change']
+
+    if ratio <= 20:
+        ratio_comment = f"{ratio}% ✅ 안전 (레버리지 낮음)"
+    elif ratio <= 25:
+        ratio_comment = f"{ratio}% 📊 보통"
+    elif ratio <= 30:
+        ratio_comment = f"{ratio}% ⚠️ 주의 (레버리지 과다)"
+    else:
+        ratio_comment = f"{ratio}% 🚨 위험 (폭락장 전조 가능성)"
+
+    if change is None:
+        change_comment = "전일대비: 데이터 없음"
+    elif change <= -4:
+        change_comment = f"전일대비: {change}% 🚨 급감 (반대매매 위험)"
+    elif change <= -2:
+        change_comment = f"전일대비: {change}% ⚠️ 주의"
+    elif change >= 2:
+        change_comment = f"전일대비: {change}% ⚠️ 레버리지 증가"
+    else:
+        change_comment = f"전일대비: {change}% 📊 보통"
+
+    result = f"· 고객예탁금: {deposit_str} / 신용잔고: {credit_str}\n"
+    result += f"· 신용잔고/예탁금 비율: {ratio_comment}\n"
+    result += f"· 신용잔고 {change_comment}\n"
+    return result
+
+# ==========================================
+# 8. 이격도 계산 (멀티스레딩용)
 # ==========================================
 def fetch_disparity(row):
     code = row['Code']
@@ -279,7 +365,7 @@ def fetch_disparity(row):
         return None
 
 # ==========================================
-# 8. 지수 이격도
+# 9. 지수 이격도
 # ==========================================
 def get_index_disparity():
     print("📈 코스피/코스닥 지수 이격도 계산 중...")
@@ -312,7 +398,7 @@ def get_index_comment(name, disparity):
         return f"· {name}: {disparity}% 📊 보통 수준입니다"
 
 # ==========================================
-# 9. 메인 로직
+# 10. 메인 로직
 # ==========================================
 def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
@@ -332,7 +418,6 @@ def main():
             raise Exception("종목 리스트가 비어있습니다.")
 
         krx_exclude = get_krx_filter()
-
         before = len(df_list)
         df_list = df_list[~df_list['Code'].isin(krx_exclude)]
         print(f"✅ KRX 필터 후: {before}개 → {len(df_list)}개")
@@ -397,12 +482,17 @@ def main():
 
         print(f"✅ 순손실 제외: {excluded_profit}개, 부채비율 제외: {excluded_debt}개, 데이터없음 제외: {excluded_nodata}개, 최종: {len(profit_results)}개")
 
+        capital_info = get_market_capital_info()
         index_disparity = get_index_disparity()
 
         if profit_results:
             report = "📈 **[시장 이격도]**\n"
             report += get_index_comment("KOSPI", index_disparity.get('KOSPI')) + "\n"
             report += get_index_comment("KOSDAQ", index_disparity.get('KOSDAQ')) + "\n"
+
+            report += "\n" + "="*30 + "\n"
+            report += "💰 **[시장 자금 현황]**\n"
+            report += get_capital_comment(capital_info)
 
             report += "\n" + "="*30 + "\n"
             report += f"### 📊 종목 분석 결과 ({filter_level} / 당기순이익 흑자+부채비율200%이하)\n"
