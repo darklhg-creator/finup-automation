@@ -21,6 +21,9 @@ CURRENT_KST = datetime.now(KST_TIMEZONE)
 TARGET_DATE = CURRENT_KST.strftime("%Y-%m-%d")
 start_date = (CURRENT_KST - timedelta(days=60)).strftime("%Y-%m-%d")
 
+# 자동 연도 설정 (항상 전년도 사업보고서 기준)
+BSNS_YEAR = str(CURRENT_KST.year - 1)
+
 # ==========================================
 # 1. 공통 함수
 # ==========================================
@@ -121,26 +124,22 @@ def get_stock_list():
 def get_krx_filter():
     print("📡 KRX 관리종목/거래정지 조회 중...")
     exclude_codes = set()
-    recent_date = None
 
-    # 최근 거래일 찾기
     date = CURRENT_KST
+    recent_date = None
     for _ in range(10):
         date_str = date.strftime("%Y%m%d")
-        for api in ["sto/stk_bydd_trd", "sto/ksq_bydd_trd"]:
-            url = f"https://data-dbg.krx.co.kr/svc/apis/{api}"
-            headers = {"AUTH_KEY": KRX_API_KEY}
-            params = {"basDd": date_str}
-            try:
-                res = requests.get(url, params=params, headers=headers, timeout=10)
-                data = res.json()
-                if data.get('OutBlock_1'):
-                    recent_date = date_str
-                    break
-            except:
-                pass
-        if recent_date:
-            break
+        url = "https://data-dbg.krx.co.kr/svc/apis/sto/ksq_bydd_trd"
+        headers = {"AUTH_KEY": KRX_API_KEY}
+        params = {"basDd": date_str}
+        try:
+            res = requests.get(url, params=params, headers=headers, timeout=10)
+            data = res.json()
+            if data.get('OutBlock_1'):
+                recent_date = date_str
+                break
+        except:
+            pass
         date = date - timedelta(days=1)
         time.sleep(0.1)
 
@@ -151,8 +150,8 @@ def get_krx_filter():
     print(f"📅 KRX 기준일: {recent_date}")
 
     for api, market in [
-        ("sto/ksq_bydd_trd", "KOSDAQ"),
-        ("sto/stk_bydd_trd", "KOSPI")
+        ("sto/stk_bydd_trd", "KOSPI"),
+        ("sto/ksq_bydd_trd", "KOSDAQ")
     ]:
         url = f"https://data-dbg.krx.co.kr/svc/apis/{api}"
         headers = {"AUTH_KEY": KRX_API_KEY}
@@ -165,11 +164,9 @@ def get_krx_filter():
                 sect = item.get('SECT_TP_NM', '').strip()
                 volume = item.get('ACC_TRDVOL', '0')
 
-                # 관리종목 제외
                 if '관리' in sect:
                     exclude_codes.add(code)
 
-                # 거래정지 제외 (거래량 0)
                 try:
                     if int(volume) == 0:
                         exclude_codes.add(code)
@@ -206,13 +203,12 @@ def get_corp_code_map():
 # 6. 영업이익 + 부채비율 조회
 # ==========================================
 def get_dart_info(corp_code):
-    """영업이익(흑자여부)과 부채비율 반환"""
     url = "https://opendart.fss.or.kr/api/fnlttSinglAcnt.json"
     for reprt_code in ["11011", "11014"]:
         params = {
             "crtfc_key": DART_API_KEY,
             "corp_code": corp_code,
-            "bsns_year": "2024",
+            "bsns_year": BSNS_YEAR,  # 자동 연도
             "reprt_code": reprt_code
         }
         try:
@@ -229,23 +225,18 @@ def get_dart_info(corp_code):
                 sj = item.get('sj_div', '')
                 account = item.get('account_nm', '')
                 amount_str = item.get('thstrm_amount', '0').replace(',', '').replace(' ', '')
-
                 try:
                     amount = int(amount_str) if amount_str else None
                 except:
                     amount = None
 
-                # 영업이익
                 if sj == 'IS' and account == '영업이익':
                     operating_profit = amount
-
-                # 자산총계 / 부채총계
                 if sj == 'BS' and account == '자산총계':
                     total_assets = amount
                 if sj == 'BS' and account == '부채총계':
                     total_liabilities = amount
 
-            # 부채비율 계산 (부채/자본 = 부채/(자산-부채))
             debt_ratio = None
             if total_assets and total_liabilities:
                 equity = total_assets - total_liabilities
@@ -271,7 +262,6 @@ def fetch_disparity(row):
         if len(df) < 20:
             return None
 
-        # 거래량 필터 (최근 20일 평균 거래량 10만주 이하 제외)
         avg_volume = sum(df['Volume'].tolist()[-20:]) / 20
         if avg_volume < 100000:
             return None
@@ -330,6 +320,7 @@ def get_index_comment(name, disparity):
 # ==========================================
 def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
+    print(f"📅 DART 조회 기준연도: {BSNS_YEAR}")
 
     #if is_holiday():
     #    msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
@@ -340,23 +331,18 @@ def main():
     print("✅ 분석을 시작합니다...")
 
     try:
-        # 종목 리스트
         df_list = get_stock_list()
         if df_list.empty:
             raise Exception("종목 리스트가 비어있습니다.")
 
-        # KRX 관리종목/거래정지 필터
         krx_exclude = get_krx_filter()
 
-        # KRX 필터 적용
         before = len(df_list)
         df_list = df_list[~df_list['Code'].isin(krx_exclude)]
         print(f"✅ KRX 필터 후: {before}개 → {len(df_list)}개")
 
-        # DART 기업코드 매핑
         corp_map = get_corp_code_map()
 
-        # 멀티스레딩으로 이격도 분석
         total_len = len(df_list)
         print(f"📡 총 {total_len}개 종목 분석 시작... (멀티스레딩 5개)")
         all_analyzed = []
@@ -374,7 +360,6 @@ def main():
 
         print(f"✅ {len(all_analyzed)}개 종목 분석 완료")
 
-        # 계단식 필터링
         results = [r for r in all_analyzed if r['disparity'] <= 90.0]
         filter_level = "이격도 90% 이하 (초과대낙폭)"
 
@@ -385,25 +370,24 @@ def main():
 
         results = sorted(results, key=lambda x: x['disparity'])
 
-        # DART 적자/부채비율 필터
         print(f"📊 DART 영업이익/부채비율 조회 중... ({len(results)}개 종목)")
         profit_results = []
         excluded_profit = 0
         excluded_debt = 0
-        no_data = 0
+        excluded_nodata = 0
 
         for r in results:
             corp_code = corp_map.get(r['code'])
             if not corp_code:
-                no_data += 1
-                profit_results.append(r)
+                excluded_nodata += 1
+                print(f"  ⚠️ 데이터없음 제외: {r['name']}({r['code']})")
                 continue
 
             profit, debt_ratio = get_dart_info(corp_code)
 
             if profit is None:
-                no_data += 1
-                profit_results.append(r)
+                excluded_nodata += 1
+                print(f"  ⚠️ 데이터없음 제외: {r['name']}({r['code']})")
             elif profit <= 0:
                 excluded_profit += 1
                 print(f"  ❌ 적자 제외: {r['name']}({r['code']})")
@@ -415,9 +399,8 @@ def main():
 
             time.sleep(0.2)
 
-        print(f"✅ 적자 제외: {excluded_profit}개, 부채비율 제외: {excluded_debt}개, 데이터없음: {no_data}개, 최종: {len(profit_results)}개")
+        print(f"✅ 적자 제외: {excluded_profit}개, 부채비율 제외: {excluded_debt}개, 데이터없음 제외: {excluded_nodata}개, 최종: {len(profit_results)}개")
 
-        # 지수 이격도
         index_disparity = get_index_disparity()
 
         if profit_results:
