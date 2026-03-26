@@ -20,7 +20,7 @@ KST_TIMEZONE = timezone(timedelta(hours=9))
 CURRENT_KST = datetime.now(KST_TIMEZONE)
 TARGET_DATE = CURRENT_KST.strftime("%Y-%m-%d")
 start_date = (CURRENT_KST - timedelta(days=60)).strftime("%Y-%m-%d")
-BSNS_YEAR = str(CURRENT_KST.year - 1)
+BSNS_YEAR = str(CURRENT_KST.year - 2)  # ✅ 2026 → 2024 (확정 연간 데이터)
 
 # 부채비율 필터 제외 업종코드 (앞자리 기준)
 DEBT_EXEMPT_CODES = ('6', '35', '49', '51', '41')
@@ -232,7 +232,7 @@ def get_dart_info(corp_code):
             net_income = None
             total_assets = None
             total_liabilities = None
-            operating_income = None  # ✅ 영업이익 추가
+            operating_income = None
 
             for item in data['list']:
                 sj = item.get('sj_div', '')
@@ -245,7 +245,7 @@ def get_dart_info(corp_code):
 
                 if sj == 'IS' and account == '당기순이익(손실)':
                     net_income = amount
-                if sj == 'IS' and account == '영업이익(손실)':  # ✅ 영업이익 추출
+                if sj == 'IS' and '영업이익' in account:  # ✅ 포함검색으로 변경
                     operating_income = amount
                 if sj == 'BS' and account == '자산총계':
                     total_assets = amount
@@ -259,12 +259,12 @@ def get_dart_info(corp_code):
                 if equity > 0:
                     debt_ratio = round((total_liabilities / equity) * 100, 1)
 
-            return net_income, debt_ratio, operating_income  # ✅ 영업이익 반환
+            return net_income, debt_ratio, operating_income
 
         except:
             continue
 
-    return None, None, None  # ✅ 영업이익 None 추가
+    return None, None, None
 
 # ==========================================
 # 7. 고객예탁금 + 신용잔고 조회
@@ -472,8 +472,6 @@ def main():
             results = [r for r in all_analyzed if r['disparity'] <= 95.0]
             filter_level = "이격도 95% 이하 (일반낙폭)"
 
-        # ✅ 이격도 낮은순 정렬 제거 (DART 조회 후 영업이익 높은순으로 정렬)
-
         print(f"📊 DART 당기순이익/부채비율/영업이익 조회 중... ({len(results)}개 종목)")
         profit_results = []
         excluded_profit = 0
@@ -487,7 +485,7 @@ def main():
                 print(f"  ⚠️ 데이터없음 제외: {r['name']}({r['code']})")
                 continue
 
-            net_income, debt_ratio, operating_income = get_dart_info(corp_code)  # ✅ 영업이익 받기
+            net_income, debt_ratio, operating_income = get_dart_info(corp_code)
 
             if net_income is None:
                 excluded_nodata += 1
@@ -499,7 +497,7 @@ def main():
                 excluded_debt += 1
                 print(f"  ❌ 부채비율 제외: {r['name']}({r['code']}) {debt_ratio}%")
             else:
-                r['operating_income'] = operating_income  # ✅ 영업이익 저장
+                r['operating_income'] = operating_income
                 profit_results.append(r)
 
             time.sleep(0.2)
@@ -526,11 +524,11 @@ def main():
             report += get_capital_comment(capital_info)
 
             report += "\n" + "="*30 + "\n"
-            report += f"### 📊 종목 분석 결과 ({filter_level} / 당기순이익 흑자+부채비율200%이하 / 영업이익 높은순)\n"
+            report += f"### 📊 종목 분석 결과 ({filter_level} / 당기순이익 흑자+부채비율200%이하 / 영업이익 높은순 / {BSNS_YEAR}년 기준)\n"
             for r in profit_results[:50]:
                 oi = r.get('operating_income')
                 oi_str = f"{oi/1e8:.0f}억" if oi else "데이터없음"
-                report += f"· **{r['name']}({r['code']})**: 이격도 {r['disparity']}% \n"
+                report += f"· **{r['name']}({r['code']})**: 이격도 {r['disparity']}% / 영업이익 {oi_str}\n"
 
             report += "\n" + "="*30 + "\n"
             report += "📝 **[Check List]**\n"
