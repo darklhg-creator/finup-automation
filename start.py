@@ -71,7 +71,7 @@ def get_stock_list():
     print(f"📅 기준 거래일: {recent_date}")
 
     for market in ["KOSPI", "KOSDAQ"]:
-        max_stocks = 1000 if market == "KOSPI" else 1000
+        max_stocks = 1000
         page = 1
         market_rows = []
         while len(market_rows) < max_stocks:
@@ -163,19 +163,9 @@ def get_corp_code_map():
     return stock_to_corp
 
 # ==========================================
-# 6. DART 재무정보 조회
+# 6. DART 재무정보 조회 (순이익만 체크)
 # ==========================================
 def get_dart_info(corp_code):
-    induty_code = ''
-    try:
-        res = requests.get("https://opendart.fss.or.kr/api/company.json",
-                           params={"crtfc_key": DART_API_KEY, "corp_code": corp_code}, timeout=10)
-        induty_code = res.json().get('induty_code', '') or ''
-    except:
-        pass
-
-    debt_exempt = any(induty_code.startswith(c) for c in DEBT_EXEMPT_CODES)
-
     for reprt_code in ["11011", "11014"]:
         try:
             res = requests.get("https://opendart.fss.or.kr/api/fnlttSinglAcnt.json", params={
@@ -186,7 +176,7 @@ def get_dart_info(corp_code):
             if data.get('status') != '000':
                 continue
 
-            net_income = total_assets = total_liabilities = operating_income = None
+            net_income = operating_income = None
             for item in data['list']:
                 sj = item.get('sj_div', '')
                 account = item.get('account_nm', '')
@@ -198,22 +188,12 @@ def get_dart_info(corp_code):
                     net_income = amount
                 if sj == 'IS' and '영업이익' in account:
                     operating_income = amount
-                if sj == 'BS' and account == '자산총계':
-                    total_assets = amount
-                if sj == 'BS' and account == '부채총계':
-                    total_liabilities = amount
 
-            debt_ratio = None
-            if not debt_exempt and total_assets and total_liabilities:
-                equity = total_assets - total_liabilities
-                if equity > 0:
-                    debt_ratio = round((total_liabilities / equity) * 100, 1)
-
-            return net_income, debt_ratio, operating_income
+            return net_income, operating_income
         except:
             continue
 
-    return None, None, None
+    return None, None
 
 # ==========================================
 # 7. 고객예탁금 + 신용잔고
@@ -370,7 +350,7 @@ def main():
 
         print(f"📊 DART 재무정보 조회 중... ({len(results)}개 종목)")
         profit_results = []
-        excluded_profit = excluded_operating = excluded_debt = excluded_nodata = 0
+        excluded_profit = excluded_nodata = 0
 
         for r in results:
             corp_code = corp_map.get(r['code'])
@@ -379,7 +359,7 @@ def main():
                 print(f"  ⚠️ 데이터없음 제외: {r['name']}({r['code']})")
                 continue
 
-            net_income, debt_ratio, operating_income = get_dart_info(corp_code)
+            net_income, operating_income = get_dart_info(corp_code)
 
             if net_income is None:
                 excluded_nodata += 1
@@ -387,12 +367,6 @@ def main():
             elif net_income <= 0:
                 excluded_profit += 1
                 print(f"  ❌ 순손실 제외: {r['name']}({r['code']})")
-            elif operating_income is not None and operating_income <= 0:
-                excluded_operating += 1
-                print(f"  ❌ 영업손실 제외: {r['name']}({r['code']}) {operating_income/1e8:.0f}억")
-            elif debt_ratio and debt_ratio > 200:
-                excluded_debt += 1
-                print(f"  ❌ 부채비율 제외: {r['name']}({r['code']}) {debt_ratio}%")
             else:
                 r['operating_income'] = operating_income
                 profit_results.append(r)
@@ -401,8 +375,7 @@ def main():
         # 영업이익 높은순 정렬, 상위 50개
         profit_results = sorted(profit_results, key=lambda x: x.get('operating_income') or 0, reverse=True)[:50]
 
-        print(f"✅ 순손실 제외: {excluded_profit}개, 영업손실 제외: {excluded_operating}개, "
-              f"부채비율 제외: {excluded_debt}개, 데이터없음 제외: {excluded_nodata}개, 최종: {len(profit_results)}개")
+        print(f"✅ 순손실 제외: {excluded_profit}개, 데이터없음 제외: {excluded_nodata}개, 최종: {len(profit_results)}개")
 
         capital_info = get_market_capital_info()
         index_disparity = get_index_disparity()
