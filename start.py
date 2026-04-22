@@ -336,7 +336,7 @@ def main():
 
         print(f"✅ {len(all_analyzed)}개 종목 분석 완료")
 
-        results = [r for r in all_analyzed if r['disparity'] <= 90.0]
+        results = [r for r in all_analyzed if r['disparity'] <= 93.0]
         filter_level = "이격도 90% 이하"
 
         if not results:
